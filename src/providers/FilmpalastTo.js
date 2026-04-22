@@ -93,104 +93,81 @@ function voeDecode(ct, luts) {
     }
 }
 
-// ==========================================
-// 3. EXTRACTORS
-// ==========================================
-
-// --- VOE EXTRACTOR ---
-// Helper to bypass terminal truncation by splitting large strings
-function logFullHtml(label, html) {
-    console.log("--- START: " + label + " (" + html.length + " chars) ---");
-    var chunkSize = 1000;
-    for (var i = 0; i < html.length; i += chunkSize) {
-        console.log(html.substring(i, i + chunkSize));
-    }
-    console.log("--- END: " + label + " ---");
-}
-
 async function extractVoe(embedUrl) {
     try {
         console.log("\n--- [VOE DEBUG START] ---");
-        console.log("[1] Requesting Original URL: " + embedUrl);
         
+        // 1. Initial Request
         var res = await fetch(embedUrl, { 
             headers: { 
                 "Referer": "https://voe.sx/",
                 "User-Agent": DEFAULT_HEADERS['User-Agent']
             } 
         });
+
+        // CAPTURE COOKIES (Crucial for bypassing redirects)
+        var cookie = res.headers.get('set-cookie');
         var data = await res.text();
 
-        // FORCE PRINT 1
-        logFullHtml("ORIGINAL_PAGE", data);
+        // If you still see nothing, this JSON stringify will force it out
+        console.log("DEBUG_RAW_INITIAL: " + JSON.stringify(data.substring(0, 500)));
 
         var redirectMatch = data.match(/window\.location\.href\s*=\s*['"](https:\/\/[^'"]+)['"]/i);
         
         if (redirectMatch && redirectMatch[1].indexOf('voe.sx') === -1) {
             var jumpUrl = redirectMatch[1];
-            console.log("[3] REDIRECT DETECTED! Jumping to: " + jumpUrl);
+            console.log("[3] REDIRECT DETECTED -> " + jumpUrl);
             
-            var res2 = await fetch(jumpUrl, { headers: { "Referer": embedUrl } });
-            console.log("[4] Reached Middleman. Status: " + res2.status);
+            // 2. Middleman Request with Cookies
+            var res2 = await fetch(jumpUrl, { 
+                headers: { 
+                    "Referer": embedUrl,
+                    "Cookie": cookie, // Pass the cookie back
+                    "User-Agent": DEFAULT_HEADERS['User-Agent']
+                } 
+            });
             data = await res2.text();
 
-            // FORCE PRINT 2
-            logFullHtml("MIDDLEMAN_PAGE", data);
-            
-            if (data.length < 1500) {
-                var secondJump = data.match(/window\.location\.href\s*=\s*['"](https:\/\/[^'"]+)['"]/i);
-                if (secondJump) {
-                    console.log("[5] SECOND JUMP DETECTED: " + secondJump[1]);
-                    var res3 = await fetch(secondJump[1], { headers: { "Referer": jumpUrl } });
-                    data = await res3.text();
-
-                    // FORCE PRINT 3
-                    logFullHtml("FINAL_LANDING_PAGE", data);
-                }
+            // --- THE "I MUST SEE THE CODE" BLOCK ---
+            console.log("!!! MANIFESTING HTML !!!");
+            var cleanData = data.replace(/\s+/g, ' '); // Remove extra whitespace
+            for (var i = 0; i < cleanData.length; i += 800) {
+                // We use a prefix to ensure the console doesn't ignore the line
+                process.stdout.write(">>DATA_CHUNK>> " + cleanData.substring(i, i + 800) + "\n");
             }
         }
 
-        console.log("[6] Analyzing Final HTML content...");
-        // This is where the Cloudflare/Bot check usually triggers
-        if (data.indexOf('Checking your browser') !== -1 || data.indexOf('cloudflare') !== -1) {
-            console.log("!!! ALERT: VOE is blocking you with Cloudflare / Browser Check.");
+        if (data.indexOf('Checking your browser') !== -1 || data.includes('cf-challenge')) {
+            console.log("!!! ALERT: Blocked by Cloudflare on Middleman.");
             return null;
         }
 
-        // ... rest of your regex logic ...
+        // 3. Extraction Logic
         var rMain = data.match(/json">\s*\[?\s*['"]([^'"]+)['"]\s*\]?\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i);
         
         if (rMain) {
-            console.log("[7] SUCCESS: Found JSON script tag and Payload.");
             var encodedArray = rMain[1];
             var loaderUrl = resolveRelativeUrl(rMain[2], embedUrl);
-            var jsRes = await fetch(loaderUrl, { headers: { "Referer": embedUrl } });
+            var jsRes = await fetch(loaderUrl, { headers: { "Referer": jumpUrl || embedUrl } });
             var jsData = await jsRes.text();
             
-            var replMatch = jsData.match(/(\[(?:'[^']{1,10}'[\s,]*){4,12}\])/i) || 
-                            jsData.match(/(\[(?:"[^"]{1,10}"[,\s]*){4,12}\])/i);
+            var replMatch = jsData.match(/(\[(?:'[^']{1,10}'[\s,]*){4,12}\])/i);
             
             if (replMatch) {
                 var decoded = voeDecode(encodedArray, replMatch[1]);
-                if (decoded && (decoded.source || decoded.direct_access_url)) {
-                    return decoded.source || decoded.direct_access_url;
-                }
+                if (decoded) return decoded.source || decoded.direct_access_url;
             }
         }
 
-        var re = /(?:mp4|hls|file)['"\s]*:\s*['"]([^'"]+)['"]/gi;
-        var m;
-        while ((m = re.exec(data)) !== null) {
-            var url = m[1];
-            if (url && url.length > 10) return url.indexOf("aHR0") === 0 ? b64decode(url) : url;
-        }
+        // Final Fallback for raw HLS links
+        var hlsMatch = data.match(/'hls'\s*:\s*'([^']+)'/i) || data.match(/"hls"\s*:\s*"([^"]+)"/i);
+        if (hlsMatch) return hlsMatch[1];
 
     } catch (err) {
         console.log("[VOE EXCEPTION] " + err.message);
     }
     return null;
 }
-
 // --- VIDARA EXTRACTOR ---
 async function extractVidara(urlStr) {
     try {
