@@ -6,32 +6,30 @@ var TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 var DEFAULT_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Referer': 'https://voe.sx/' 
+    'Referer': BASE_URL
 };
 
 // ==========================================
-// 1. HELPER UTILS
+// 1. HELPER UTILS (Your Provided Logic)
 // ==========================================
 function b64decode(str) {
-    try {
-        var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        var result = "";
-        var i = 0;
-        var s = str.replace(/[^A-Za-z0-9+/]/g, "");
-        while (i < s.length) {
-            var a = chars.indexOf(s[i++]);
-            var b = chars.indexOf(s[i++]);
-            var c = i < s.length ? chars.indexOf(s[i++]) : -1;
-            var d = i < s.length ? chars.indexOf(s[i++]) : -1;
-            var cb = c === -1 ? 0 : c;
-            var db = d === -1 ? 0 : d;
-            var n = a << 18 | b << 12 | cb << 6 | db;
-            result += String.fromCharCode(n >> 16 & 255);
-            if (c !== -1) result += String.fromCharCode(n >> 8 & 255);
-            if (d !== -1) result += String.fromCharCode(n & 255);
-        }
-        return result;
-    } catch(e) { return null; }
+    var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    var result = "";
+    var i = 0;
+    var s = str.replace(/[^A-Za-z0-9+/]/g, "");
+    while (i < s.length) {
+        var a = chars.indexOf(s[i++]);
+        var b = chars.indexOf(s[i++]);
+        var c = i < s.length ? chars.indexOf(s[i++]) : -1;
+        var d = i < s.length ? chars.indexOf(s[i++]) : -1;
+        var cb = c === -1 ? 0 : c;
+        var db = d === -1 ? 0 : d;
+        var n = a << 18 | b << 12 | cb << 6 | db;
+        result += String.fromCharCode(n >> 16 & 255);
+        if (c !== -1) result += String.fromCharCode(n >> 8 & 255);
+        if (d !== -1) result += String.fromCharCode(n & 255);
+    }
+    return result;
 }
 
 function resolveRelativeUrl(href, base) {
@@ -44,7 +42,7 @@ function resolveRelativeUrl(href, base) {
 }
 
 // ==========================================
-// 2. VOE DECODER (LaMovie Logic)
+// 2. VOE DECODER (Your Provided Logic)
 // ==========================================
 function voeDecode(ct, luts) {
     try {
@@ -54,122 +52,93 @@ function voeDecode(ct, luts) {
         var escapedLuts = rawLuts.map(function(i) {
             return i.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         });
-
         var txt = "";
         for (var ci = 0; ci < ct.length; ci++) {
             var x = ct.charCodeAt(ci);
-            if (x > 64 && x < 91) x = ((x - 65 + 13) % 26) + 65;
-            else if (x > 96 && x < 123) x = ((x - 97 + 13) % 26) + 97;
+            if (x > 64 && x < 91) x = (x - 52) % 26 + 65;
+            else if (x > 96 && x < 123) x = (x - 84) % 26 + 97;
             txt += String.fromCharCode(x);
         }
-
-        for (var pi = 0; pi < escapedLuts.length; pi++) {
-            txt = txt.replace(new RegExp(escapedLuts[pi], "g"), "");
-        }
-
+        for (var pi = 0; pi < escapedLuts.length; pi++) txt = txt.replace(new RegExp(escapedLuts[pi], "g"), "_");
+        txt = txt.split("_").join("");
         var decoded1 = b64decode(txt);
+        if (!decoded1) return null;
         var step4 = "";
-        for (var si = 0; si < decoded1.length; si++) {
-            step4 += String.fromCharCode((decoded1.charCodeAt(si) - 3 + 256) % 256);
-        }
-
+        for (var si = 0; si < decoded1.length; si++) step4 += String.fromCharCode((decoded1.charCodeAt(si) - 3 + 256) % 256);
         var revBase64 = step4.split("").reverse().join("");
         var finalStr = b64decode(revBase64);
-        return finalStr ? JSON.parse(finalStr) : null;
-    } catch (e) { return null; }
+        if (!finalStr) return null;
+        return JSON.parse(finalStr);
+    } catch (e) {
+        return null;
+    }
 }
 
 // ==========================================
-// 3. EXTRACTORS (Extreme Debugging)
+// 3. EXTRACTORS
 // ==========================================
-async function extractVoe(url) {
-    try {
-        console.log("[DEBUG-VOE] Step 1: Fetching Landing Page...");
-        var response = await fetch(url, { headers: DEFAULT_HEADERS });
-        var html = await response.text();
 
-        // 1. Check for the Redirect Script
-        var redirectMatch = html.match(/window\.location\.href\s*=\s*['"](https:\/\/[^'"]+)['"]/i);
-        
+async function extractVoe(embedUrl) {
+    try {
+        // Step 1: Handle the Landing Page Redirect
+        var res = await fetch(embedUrl, { headers: { "Referer": embedUrl } });
+        var data = await res.text();
+
+        // Redirect check (per your debug logs)
+        var redirectMatch = data.match(/window\.location\.href\s*=\s*['"](https:\/\/[^'"]+)['"]/i);
         if (redirectMatch && redirectMatch[1].indexOf('voe.sx') === -1) {
-            var middlemanUrl = redirectMatch[1];
-            console.log("[DEBUG-VOE] Step 2: Following Redirect to -> " + middlemanUrl);
-            
-            // Fetch the middleman (charlestoughrace.com or similar)
-            // We must update the Referer to the original VOE URL
-            var middleRes = await fetch(middlemanUrl, { 
-                headers: Object.assign({}, DEFAULT_HEADERS, { 'Referer': url }) 
-            });
-            
-            // The middleman usually redirects back to VOE automatically.
-            // If your fetch environment follows 302 redirects, middleRes.url will be the NEW VOE URL.
-            var finalVoeUrl = middleRes.url;
-            console.log("[DEBUG-VOE] Step 3: Arrived at Video Page -> " + finalVoeUrl);
-            
-            var finalHtml = await middleRes.text();
-            html = finalHtml; // Swap the HTML with the actual video player HTML
+            console.log("[VOE] Redirecting to bypass landing page...");
+            res = await fetch(redirectMatch[1], { headers: { "Referer": embedUrl } });
+            data = await res.text();
         }
 
-        // 2. Now run the standard LaMovie Extraction on the NEW HTML
-        var rMain = html.match(/json">\s*\[?\s*['"]([^'"]+)['"]\s*\]?\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i);
-        
+        // Step 2: Use your resolveVoe logic on the final page data
+        var rMain = data.match(/json">\s*\[?\s*['"]([^'"]+)['"]\s*\]?\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i);
         if (rMain) {
-            var encodedPayload = rMain[1];
-            var loaderUrl = resolveRelativeUrl(rMain[2], url);
-            
-            console.log("[DEBUG-VOE] Payload Found. Fetching LUT script...");
-            
-            var jsRes = await fetch(loaderUrl, { headers: { 'Referer': url } });
+            var encodedArray = rMain[1];
+            var loaderUrl = resolveRelativeUrl(rMain[2], embedUrl);
+            var jsRes = await fetch(loaderUrl, { headers: { "Referer": embedUrl } });
             var jsData = await jsRes.text();
-
-            var replMatch = jsData.match(/(\[(?:'[^']{1,10}'[\s,]*){4,12}\])/i) || 
-                            jsData.match(/(\[(?:"[^"]{1,10}"[,\s]*){4,12}\])/i);
             
+            var replMatch = jsData.match(/(\[(?:'[^']{1,10}'[\s,]*){4,12}\])/i) || jsData.match(/(\[(?:"[^"]{1,10}"[,\s]*){4,12}\])/i);
             if (replMatch) {
-                var decoded = voeDecode(encodedPayload, replMatch[1]);
+                var decoded = voeDecode(encodedArray, replMatch[1]);
                 if (decoded && (decoded.source || decoded.direct_access_url)) {
                     return decoded.source || decoded.direct_access_url;
                 }
             }
-        } else {
-            // Last ditch effort: Look for the 'wc' fallback if regex fails
-            var wcMatch = html.match(/window\.wc\s*=\s*['"]([^'"]+)['"]/);
-            if (wcMatch) return b64decode(wcMatch[1]);
-            
-            console.log("[DEBUG-VOE] FAILED: Still no payload. View HTML snippet: " + html.substring(0, 200));
         }
 
-    } catch (e) {
-        console.log("[DEBUG-VOE] Exception: " + e.message);
+        // Fallback
+        var re = /(?:mp4|hls|file)['"\s]*:\s*['"]([^'"]+)['"]/gi;
+        var m;
+        while ((m = re.exec(data)) !== null) {
+            var url = m[1];
+            if (url && url.indexOf("aHR0") === 0) return b64decode(url);
+            if (url && url.indexOf("http") === 0) return url;
+        }
+    } catch (err) {
+        console.log("[VOE] Error: " + err.message);
     }
     return null;
 }
 
-// Vidara Extractor (Restored)
 async function extractVidara(urlStr) {
     try {
         var filecodeMatch = urlStr.match(/\/(?:e|v|f)\/([a-zA-Z0-9]+)/);
         if (!filecodeMatch) return null;
         var apiBase = urlStr.split('/')[0] + '//' + urlStr.split('/')[2];
-        
         var pageRes = await fetch(urlStr, { headers: DEFAULT_HEADERS });
         var pageHtml = await pageRes.text();
         var tokenMatch = pageHtml.match(/key:\s*['"]([^'"]+)['"]/i);
-        var token = tokenMatch ? tokenMatch[1] : null;
-
+        
         var response = await fetch(apiBase + '/api/stream', {
             method: 'POST',
-            headers: {
-                'User-Agent': DEFAULT_HEADERS['User-Agent'],
-                'Content-Type': 'application/json',
-                'Referer': urlStr,
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            body: JSON.stringify({ filecode: filecodeMatch[1], device: 'web', key: token })
+            headers: Object.assign({}, DEFAULT_HEADERS, { 'Content-Type': 'application/json', 'Referer': urlStr, 'X-Requested-With': 'XMLHttpRequest' }),
+            body: JSON.stringify({ filecode: filecodeMatch[1], device: 'web', key: tokenMatch ? tokenMatch[1] : null })
         });
-
         var data = await response.json();
-        return data && (data.streaming_url || data.url);
+        return data && (data.streaming_url || data.url) ? (data.streaming_url || data.url) : null;
     } catch (e) { return null; }
 }
 
@@ -208,18 +177,18 @@ async function getStreams(tmdbId, mediaType) {
 
         for (var i = 0; i < anchors.length; i++) {
             var aHref = $stream(anchors[i]).attr('href');
-            if (!aHref) continue;
+            if (!aHref || aHref.indexOf('javascript') !== -1) continue;
             var fullUrl = aHref.indexOf('//') === 0 ? 'https:' + aHref : (aHref.indexOf('http') === 0 ? aHref : 'https://' + aHref);
             
             if (fullUrl.indexOf('voe.sx') !== -1) {
                 var direct = await extractVoe(fullUrl);
-                if (direct) results.push({ url: direct, meta: { title: "VOE", countryCodes: ['de'] } });
+                if (direct) results.push({ url: direct, meta: { title: "VOE \xB7 1080p", countryCodes: ['de'] } });
             } else if (fullUrl.indexOf('vidara.') !== -1 || fullUrl.indexOf('vidfast.') !== -1) {
                 var direct = await extractVidara(fullUrl);
-                if (direct) results.push({ url: direct, meta: { title: "Vidara", countryCodes: ['de'] } });
+                if (direct) results.push({ url: direct, meta: { title: "Vidara \xB7 1080p", countryCodes: ['de'] } });
             }
         }
-    } catch (e) { console.log("GLOBAL ERROR: " + e.message); }
+    } catch (e) { console.log("[Filmpalast] Fatal Error: " + e.message); }
     return results;
 }
 
