@@ -24,4 +24,4 @@ jobs:
         run: npm install cheerio-without-node-native
 
       - name: Run Scraper Test
-        run: node test-scraper.js
+        run: node test.js
