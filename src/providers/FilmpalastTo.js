@@ -94,28 +94,23 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                                     else if (href.startsWith('//')) fullUrl = `https:${href}`;
                                     else fullUrl = `https://${href}`;
 
+                                    // Hoster extraction logic you requested
                                     if (!hosterName || !isNaN(Number(hosterName))) {
                                         hosterName = $stream(element).attr('title') || 'Stream';
                                     }
 
-                                    results.push({
-                                        /** * CHANGED: We put the URL into the 'name' field. 
-                                         * In most UI layouts, 'name' is the bold primary title.
-                                         */
-                                        name: fullUrl, 
-                                        
-                                        /**
-                                         * We can keep the hoster name in 'title' (the subtitle line)
-                                         */
-                                        title: `⌜ Filmpalast ⌟ | ${hosterName}`,
-                                        
-                                        url: fullUrl,
-                                        provider: 'Filmpalast',
-                                        headers: {
-                                            'Referer': BASE_URL,
-                                            'User-Agent': DEFAULT_HEADERS['User-Agent']
-                                        }
-                                    });
+                                    // MATCHING YOUR SOURCE RESULT STRUCTURE
+                                    try {
+                                        results.push({
+                                            url: fullUrl, // Nuvio handles the string to URL conversion
+                                            meta: {
+                                                title: `${hosterName} (Filmpalast)`,
+                                                countryCodes: ['de']
+                                            }
+                                        });
+                                    } catch (e) {
+                                        // ignore
+                                    }
                                 }
                             });
 
