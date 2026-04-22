@@ -37,6 +37,7 @@ function fetchAutocomplete(imdbId) {
     .then(r => r.ok ? r.json() : [])
     .then(movieList => {
         if (!Array.isArray(movieList) || movieList.length === 0) return null;
+        // Logic: prioritize non-English titles
         return movieList.find(t => !t.toLowerCase().includes('english')) || movieList[0];
     })
     .catch(() => null);
@@ -53,6 +54,7 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
 
             const searchPageURL = `${BASE_URL}/search/title/${encodeURIComponent(filteredResult)}`;
 
+            // Step 2: Find the Stream Page
             return fetch(searchPageURL, { headers: DEFAULT_HEADERS })
                 .then(r => r.ok ? r.text() : '')
                 .then(html => {
@@ -74,19 +76,13 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
 
                     if (!streamPageUrl) return [];
 
-                    // Step 3: Extract Title and Hoster Links
+                    // Step 3: Extract Hoster Links
                     return fetch(streamPageUrl, { headers: DEFAULT_HEADERS })
                         .then(r => r.ok ? r.text() : '')
                         .then(streamHtml => {
                             const $stream = cheerio.load(streamHtml);
                             const results = [];
                             
-                            // --- NEW: Extract the actual title from the page ---
-                            // Usually found in <h2 class="glow"> or within the breadcrumbs/header
-                            const actualTitle = $stream('h2.glow').first().text().trim() || 
-                                               $stream('h1').first().text().trim() || 
-                                               filteredResult;
-
                             const linkElements = $stream(
                                 '.currentStreamLinks a, .hosterSite span a, .streamList a'
                             );
@@ -101,13 +97,16 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                                     else if (href.startsWith('//')) fullUrl = `https:${href}`;
                                     else fullUrl = `https://${href}`;
 
+                                    // Fix numeric or empty hoster names using the title attribute
                                     if (!hosterName || !isNaN(Number(hosterName))) {
                                         hosterName = $stream(element).attr('title') || 'Stream';
                                     }
 
                                     results.push({
-                                        name: `⌜ Filmpalast ⌟ | ${hosterName}`,
-                                        title: actualTitle, // Using the extracted page title here
+                                        // "name" is often what Nuvio shows in the list
+                                        name: `⌜ Filmpalast ⌟ | ${hosterName}`, 
+                                        // "title" is the specific string you requested from the meta logic
+                                        title: `${hosterName} (Filmpalast)`,
                                         url: fullUrl,
                                         quality: 'HD',
                                         provider: 'Filmpalast',
