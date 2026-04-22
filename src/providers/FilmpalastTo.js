@@ -1,4 +1,5 @@
 // Filmpalast Scraper for Nuvio Local Scrapers
+// Goal: Display the full stream URL as the result title
 
 const cheerio = require('cheerio-without-node-native');
 
@@ -80,13 +81,10 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                             const $stream = cheerio.load(streamHtml);
                             const results = [];
                             
-                            const linkElements = $stream(
-                                '.currentStreamLinks a, .hosterSite span a, .streamList a'
-                            );
+                            const linkElements = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a');
 
                             linkElements.each((_, element) => {
                                 const href = $stream(element).attr('href');
-                                let hosterName = $stream(element).text().trim();
 
                                 if (href && href !== '#' && !href.includes('javascript:void')) {
                                     let fullUrl;
@@ -94,23 +92,16 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                                     else if (href.startsWith('//')) fullUrl = `https:${href}`;
                                     else fullUrl = `https://${href}`;
 
-                                    // Hoster extraction logic you requested
-                                    if (!hosterName || !isNaN(Number(hosterName))) {
-                                        hosterName = $stream(element).attr('title') || 'Stream';
-                                    }
-
-                                    // MATCHING YOUR SOURCE RESULT STRUCTURE
                                     try {
                                         results.push({
-                                            url: fullUrl, // Nuvio handles the string to URL conversion
+                                            url: fullUrl,
                                             meta: {
-                                                title: `${hosterName} (Filmpalast)`,
+                                                // This is the line that determines the displayed text
+                                                title: fullUrl, 
                                                 countryCodes: ['de']
                                             }
                                         });
-                                    } catch (e) {
-                                        // ignore
-                                    }
+                                    } catch (e) {}
                                 }
                             });
 
