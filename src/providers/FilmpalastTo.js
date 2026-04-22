@@ -1,7 +1,8 @@
 // Filmpalast Scraper for Nuvio Local Scrapers
-// Structure matched to FilmpalastTO Source class
-
 const cheerio = require('cheerio-without-node-native');
+
+// Import the VOE extractor from the specified path
+const { extractVoe } = require('../extractors/voe');
 
 const BASE_URL = 'https://filmpalast.to';
 const TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
@@ -14,9 +15,6 @@ const DEFAULT_HEADERS = {
 
 // ================= HELPERS =================
 
-/**
- * Converts Nuvio TMDB ID to IMDB ID for Autocomplete
- */
 function getImdbId(tmdbId, type) {
     const targetType = type === 'series' ? 'tv' : 'movie';
     return fetch(`${TMDB_BASE_URL}/${targetType}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`)
@@ -31,13 +29,11 @@ async function getStreams(tmdbId, mediaType = 'movie', season = null, episode = 
     const results = [];
     
     try {
-        // 0. Get IMDB ID (Required for the autocomplete logic below)
         const imdbId = await getImdbId(tmdbId, mediaType);
         if (!imdbId) return [];
 
-        // Step 1: Autocomplete
-        const autocompleteUrl = `${BASE_URL}/autocomplete.php`;
-        const response = await fetch(autocompleteUrl, {
+        // Step 1: Autocomplete search via IMDB ID
+        const response = await fetch(`${BASE_URL}/autocomplete.php`, {
             method: 'POST',
             headers: {
                 ...DEFAULT_HEADERS,
@@ -50,77 +46,77 @@ async function getStreams(tmdbId, mediaType = 'movie', season = null, episode = 
         const movieList = await response.json();
         if (!Array.isArray(movieList) || movieList.length === 0) return [];
 
-        const filteredResult = movieList.find(title => 
-            !title.toLowerCase().includes('english')
-        ) || movieList[0];
-
+        const filteredResult = movieList.find(t => !t.toLowerCase().includes('english')) || movieList[0];
         const searchPageURL = `${BASE_URL}/search/title/${encodeURIComponent(filteredResult)}`;
 
-        // Step 2: Find stream page
+        // Step 2: Find the stream page
         const html = await fetch(searchPageURL, { headers: DEFAULT_HEADERS }).then(r => r.text());
         const $ = cheerio.load(html);
 
         let streamPageUrl;
         const streamAnchor = $('a[href*="filmpalast.to/stream/"]').first();
-
         if (streamAnchor.length > 0) {
             const href = streamAnchor.attr('href');
-            if (href) {
-                if (href.startsWith('http')) streamPageUrl = href;
-                else if (href.startsWith('//')) streamPageUrl = `https:${href}`;
-                else streamPageUrl = `${BASE_URL}${href}`;
-            }
+            streamPageUrl = href.startsWith('http') ? href : (href.startsWith('//') ? `https:${href}` : `${BASE_URL}${href}`);
         } else if (html.includes('currentStreamLinks')) {
             streamPageUrl = searchPageURL;
         }
 
         if (!streamPageUrl) return [];
 
-        // Step 3: Extract hoster links
+        // Step 3: Extract and Filter Hoster Links
         const streamHtml = await fetch(streamPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
         const $stream = cheerio.load(streamHtml);
+        const linkElements = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a');
 
-        const linkElements = $stream(
-            '.currentStreamLinks a, .hosterSite span a, .streamList a'
-        );
-
-        linkElements.each((_, element) => {
+        // Use for...of to handle the async calls to the VOE extractor
+        for (const element of linkElements.toArray()) {
             const href = $stream(element).attr('href');
+            if (!href || href === '#' || href.includes('javascript:void')) continue;
 
-            if (href && href !== '#' && !href.includes('javascript:void')) {
-                let fullUrl;
-                if (href.startsWith('http')) fullUrl = href;
-                else if (href.startsWith('//')) fullUrl = `https:${href}`;
-                else fullUrl = `https://${href}`;
+            const fullUrl = href.startsWith('http') ? href : (href.startsWith('//') ? `https:${href}` : `https://${href}`);
 
-                // Logic to push results exactly as the Source class
+            // --- STRICT FILTER: ONLY PASS VOE LINKS ---
+            if (fullUrl.includes('voe.sx')) {
                 try {
-                    results.push({
-                        url: fullUrl,
-                        meta: {
-                            // SHOW COMPLETE URL AS TITLE
-                            title: fullUrl, 
-                            countryCodes: ['de']
+                    const extractedData = await extractVoe(fullUrl);
+                    
+                    if (extractedData) {
+                        // If extractVoe returns an array of links
+                        if (Array.isArray(extractedData)) {
+                            extractedData.forEach(item => {
+                                results.push({
+                                    ...item,
+                                    meta: {
+                                        title: item.url || fullUrl, // Shows the stream URL as title
+                                        countryCodes: ['de']
+                                    }
+                                });
+                            });
+                        } else {
+                            // If extractVoe returns a single object
+                            results.push({
+                                ...extractedData,
+                                meta: {
+                                    title: extractedData.url || fullUrl,
+                                    countryCodes: ['de']
+                                }
+                            });
                         }
-                    });
+                    }
                 } catch (e) {
-                    // ignore invalid URLs
+                    console.error(`[Filmpalast] VOE extraction failed for ${fullUrl}:`, e.message);
                 }
-            }
-        });
+            } 
+            // All other hosters are ignored as they don't match the VOE filter.
+        }
 
-        console.info(`[Filmpalast] Successfully added ${results.length} results for ${imdbId}`);
     } catch (error) {
         console.error(`[Filmpalast] Scraper failed: ${error.message}`);
     }
 
-    return results;
+    // Deduplicate in case the same link appears twice on the page
+    return results.filter((v, i, a) => a.findIndex(t => t.url === v.url) === i);
 }
 
-// ================= EXPORT =================
-
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { getStreams };
-} else {
-    global.getStreams = { getStreams };
-}
+module.exports = { getStreams };
