@@ -1,5 +1,5 @@
 // Filmpalast Scraper for Nuvio Local Scrapers
-// Final Version: Force URL display only
+// Structure matched to FilmpalastTO Source class
 
 const cheerio = require('cheerio-without-node-native');
 
@@ -14,6 +14,9 @@ const DEFAULT_HEADERS = {
 
 // ================= HELPERS =================
 
+/**
+ * Converts Nuvio TMDB ID to IMDB ID for Autocomplete
+ */
 function getImdbId(tmdbId, type) {
     const targetType = type === 'series' ? 'tv' : 'movie';
     return fetch(`${TMDB_BASE_URL}/${targetType}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`)
@@ -22,100 +25,96 @@ function getImdbId(tmdbId, type) {
         .catch(() => null);
 }
 
-function fetchAutocomplete(imdbId) {
-    const url = `${BASE_URL}/autocomplete.php`;
-    const body = `term=${encodeURIComponent(imdbId)}`;
-
-    return fetch(url, {
-        method: 'POST',
-        headers: {
-            ...DEFAULT_HEADERS,
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'X-Requested-With': 'XMLHttpRequest'
-        },
-        body: body
-    })
-    .then(r => r.ok ? r.json() : [])
-    .then(movieList => {
-        if (!Array.isArray(movieList) || movieList.length === 0) return null;
-        return movieList.find(t => !t.toLowerCase().includes('english')) || movieList[0];
-    })
-    .catch(() => null);
-}
-
 // ================= MAIN =================
 
-function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) {
-    return getImdbId(tmdbId, mediaType).then(imdbId => {
+async function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) {
+    const results = [];
+    
+    try {
+        // 0. Get IMDB ID (Required for the autocomplete logic below)
+        const imdbId = await getImdbId(tmdbId, mediaType);
         if (!imdbId) return [];
 
-        return fetchAutocomplete(imdbId).then(filteredResult => {
-            if (!filteredResult) return [];
-
-            const searchPageURL = `${BASE_URL}/search/title/${encodeURIComponent(filteredResult)}`;
-
-            return fetch(searchPageURL, { headers: DEFAULT_HEADERS })
-                .then(r => r.ok ? r.text() : '')
-                .then(html => {
-                    const $ = cheerio.load(html);
-                    let streamPageUrl = null;
-
-                    const streamAnchor = $('a[href*="filmpalast.to/stream/"]').first();
-
-                    if (streamAnchor.length > 0) {
-                        const href = streamAnchor.attr('href');
-                        if (href) {
-                            if (href.startsWith('http')) streamPageUrl = href;
-                            else if (href.startsWith('//')) streamPageUrl = `https:${href}`;
-                            else streamPageUrl = `${BASE_URL}${href}`;
-                        }
-                    } else if (html.includes('currentStreamLinks')) {
-                        streamPageUrl = searchPageURL;
-                    }
-
-                    if (!streamPageUrl) return [];
-
-                    return fetch(streamPageUrl, { headers: DEFAULT_HEADERS })
-                        .then(r => r.ok ? r.text() : '')
-                        .then(streamHtml => {
-                            const $stream = cheerio.load(streamHtml);
-                            const results = [];
-                            
-                            // Target common hoster link containers on Filmpalast
-                            const linkElements = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a');
-
-                            linkElements.each((_, element) => {
-                                const href = $stream(element).attr('href');
-
-                                if (href && href !== '#' && !href.includes('javascript:void')) {
-                                    let fullUrl;
-                                    if (href.startsWith('http')) fullUrl = href;
-                                    else if (href.startsWith('//')) fullUrl = `https:${href}`;
-                                    else if (href.startsWith('/')) fullUrl = `https://${href.substring(1)}`;
-                                    else fullUrl = `https://${href}`;
-
-                                    results.push({
-                                        // Overwriting EVERYTHING with the URL to ensure it shows
-                                        name: fullUrl, 
-                                        url: fullUrl,
-                                        meta: {
-                                            title: fullUrl,
-                                            countryCodes: ['de']
-                                        }
-                                    });
-                                }
-                            });
-
-                            // Deduplicate results based on URL
-                            return results.filter((v, i, a) => a.findIndex(t => t.url === v.url) === i);
-                        });
-                });
+        // Step 1: Autocomplete
+        const autocompleteUrl = `${BASE_URL}/autocomplete.php`;
+        const response = await fetch(autocompleteUrl, {
+            method: 'POST',
+            headers: {
+                ...DEFAULT_HEADERS,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: `term=${encodeURIComponent(imdbId)}`
         });
-    })
-    .catch(err => {
-        console.error(`[Filmpalast] Scraper Error: ${err.message}`);
-        return [];
-    });
+
+        const movieList = await response.json();
+        if (!Array.isArray(movieList) || movieList.length === 0) return [];
+
+        const filteredResult = movieList.find(title => 
+            !title.toLowerCase().includes('english')
+        ) || movieList[0];
+
+        const searchPageURL = `${BASE_URL}/search/title/${encodeURIComponent(filteredResult)}`;
+
+        // Step 2: Find stream page
+        const html = await fetch(searchPageURL, { headers: DEFAULT_HEADERS }).then(r => r.text());
+        const $ = cheerio.load(html);
+
+        let streamPageUrl;
+        const streamAnchor = $('a[href*="filmpalast.to/stream/"]').first();
+
+        if (streamAnchor.length > 0) {
+            const href = streamAnchor.attr('href');
+            if (href) {
+                if (href.startsWith('http')) streamPageUrl = href;
+                else if (href.startsWith('//')) streamPageUrl = `https:${href}`;
+                else streamPageUrl = `${BASE_URL}${href}`;
+            }
+        } else if (html.includes('currentStreamLinks')) {
+            streamPageUrl = searchPageURL;
+        }
+
+        if (!streamPageUrl) return [];
+
+        // Step 3: Extract hoster links
+        const streamHtml = await fetch(streamPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
+        const $stream = cheerio.load(streamHtml);
+
+        const linkElements = $stream(
+            '.currentStreamLinks a, .hosterSite span a, .streamList a'
+        );
+
+        linkElements.each((_, element) => {
+            const href = $stream(element).attr('href');
+
+            if (href && href !== '#' && !href.includes('javascript:void')) {
+                let fullUrl;
+                if (href.startsWith('http')) fullUrl = href;
+                else if (href.startsWith('//')) fullUrl = `https:${href}`;
+                else fullUrl = `https://${href}`;
+
+                // Logic to push results exactly as the Source class
+                try {
+                    results.push({
+                        url: fullUrl,
+                        meta: {
+                            // SHOW COMPLETE URL AS TITLE
+                            title: fullUrl, 
+                            countryCodes: ['de']
+                        }
+                    });
+                } catch (e) {
+                    // ignore invalid URLs
+                }
+            }
+        });
+
+        console.info(`[Filmpalast] Successfully added ${results.length} results for ${imdbId}`);
+    } catch (error) {
+        console.error(`[Filmpalast] Scraper failed: ${error.message}`);
+    }
+
+    return results;
 }
 
 // ================= EXPORT =================
