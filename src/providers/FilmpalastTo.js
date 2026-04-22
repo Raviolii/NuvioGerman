@@ -98,6 +98,16 @@ function voeDecode(ct, luts) {
 // ==========================================
 
 // --- VOE EXTRACTOR ---
+// Helper to bypass terminal truncation by splitting large strings
+function logFullHtml(label, html) {
+    console.log("--- START: " + label + " (" + html.length + " chars) ---");
+    var chunkSize = 1000;
+    for (var i = 0; i < html.length; i += chunkSize) {
+        console.log(html.substring(i, i + chunkSize));
+    }
+    console.log("--- END: " + label + " ---");
+}
+
 async function extractVoe(embedUrl) {
     try {
         console.log("\n--- [VOE DEBUG START] ---");
@@ -111,12 +121,9 @@ async function extractVoe(embedUrl) {
         });
         var data = await res.text();
 
-        // PRINT FULL HTML FROM ORIGINAL URL
-        console.log("--- FULL HTML START (Original URL) ---");
-        console.log(data);
-        console.log("--- FULL HTML END (Original URL) ---");
+        // FORCE PRINT 1
+        logFullHtml("ORIGINAL_PAGE", data);
 
-        console.log("[2] Page Length: " + data.length + " chars.");
         var redirectMatch = data.match(/window\.location\.href\s*=\s*['"](https:\/\/[^'"]+)['"]/i);
         
         if (redirectMatch && redirectMatch[1].indexOf('voe.sx') === -1) {
@@ -127,10 +134,8 @@ async function extractVoe(embedUrl) {
             console.log("[4] Reached Middleman. Status: " + res2.status);
             data = await res2.text();
 
-            // PRINT FULL HTML FROM MIDDLEMAN/JUMP URL
-            console.log("--- FULL HTML START (Middleman URL) ---");
-            console.log(data);
-            console.log("--- FULL HTML END (Middleman URL) ---");
+            // FORCE PRINT 2
+            logFullHtml("MIDDLEMAN_PAGE", data);
             
             if (data.length < 1500) {
                 var secondJump = data.match(/window\.location\.href\s*=\s*['"](https:\/\/[^'"]+)['"]/i);
@@ -139,18 +144,16 @@ async function extractVoe(embedUrl) {
                     var res3 = await fetch(secondJump[1], { headers: { "Referer": jumpUrl } });
                     data = await res3.text();
 
-                    // PRINT FULL HTML FROM SECOND JUMP
-                    console.log("--- FULL HTML START (Second Jump) ---");
-                    console.log(data);
-                    console.log("--- FULL HTML END (Second Jump) ---");
+                    // FORCE PRINT 3
+                    logFullHtml("FINAL_LANDING_PAGE", data);
                 }
             }
         }
 
         console.log("[6] Analyzing Final HTML content...");
+        // This is where the Cloudflare/Bot check usually triggers
         if (data.indexOf('Checking your browser') !== -1 || data.indexOf('cloudflare') !== -1) {
             console.log("!!! ALERT: VOE is blocking you with Cloudflare / Browser Check.");
-            // We already printed the HTML above, so we can see what triggered this.
             return null;
         }
 
@@ -158,7 +161,6 @@ async function extractVoe(embedUrl) {
         var rMain = data.match(/json">\s*\[?\s*['"]([^'"]+)['"]\s*\]?\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i);
         
         if (rMain) {
-            // Success logic remains same...
             console.log("[7] SUCCESS: Found JSON script tag and Payload.");
             var encodedArray = rMain[1];
             var loaderUrl = resolveRelativeUrl(rMain[2], embedUrl);
@@ -176,7 +178,6 @@ async function extractVoe(embedUrl) {
             }
         }
 
-        // Fallback logic...
         var re = /(?:mp4|hls|file)['"\s]*:\s*['"]([^'"]+)['"]/gi;
         var m;
         while ((m = re.exec(data)) !== null) {
