@@ -10,189 +10,144 @@ const DEFAULT_HEADERS = {
 };
 
 // ==========================================
-// 1. INTEGRATED VOE DECODER (Logic from voe.js)
+// 1. VOE EXTRACTOR LOGIC
 // ==========================================
 
 const voeDecoder = {
-    shiftLetters(input) {
-        return input.replace(/[a-zA-Z]/g, (c) => {
-            const base = c <= 'Z' ? 65 : 97;
-            return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
-        });
-    },
-
-    replaceJunk(input) {
-        const junkParts = ["@$", "^^", "~@", "%?", "*~", "!!", "#&"];
-        let result = input;
-        junkParts.forEach(junk => {
-            result = result.split(junk).join("_");
-        });
-        return result.replace(/_/g, "");
-    },
-
-    shiftBack(s, n) {
-        return Array.from(s)
-            .map(c => String.fromCharCode(c.charCodeAt(0) - n))
-            .join('');
-    },
-
+    shiftLetters: (i) => i.replace(/[a-zA-Z]/g, (c) => String.fromCharCode(((c.charCodeAt(0) - (c <= 'Z' ? 65 : 97) + 13) % 26) + (c <= 'Z' ? 65 : 97))),
+    replaceJunk: (i) => ["@$", "^^", "~@", "%?", "*~", "!!", "#&"].reduce((a, b) => a.split(b).join("_"), i).replace(/_/g, ""),
+    shiftBack: (s, n) => Array.from(s).map(c => String.fromCharCode(c.charCodeAt(0) - n)).join(''),
     decode(encoded) {
         try {
-            // Step 1: ROT13
-            let step1 = this.shiftLetters(encoded);
-            // Step 2: Junk removal
-            let step2 = this.replaceJunk(step1);
-            // Step 3: Base64 decode
-            let step3 = Buffer.from(step2, 'base64').toString('utf-8');
-            // Step 4: CharCode Shift
-            let step4 = this.shiftBack(step3, 3);
-            // Step 5: Reverse and Base64 decode
-            let reversed = step4.split('').reverse().join('');
-            let step5 = Buffer.from(reversed, 'base64').toString('utf-8');
-            
-            return JSON.parse(step5);
-        } catch (e) {
-            return null;
-        }
+            let s1 = this.shiftLetters(encoded);
+            let s2 = this.replaceJunk(s1);
+            let s3 = Buffer.from(s2, 'base64').toString('utf-8');
+            let s4 = this.shiftBack(s3, 3);
+            let s5 = Buffer.from(s4.split('').reverse().join(''), 'base64').toString('utf-8');
+            return JSON.parse(s5);
+        } catch (e) { return null; }
     }
 };
 
 async function extractVoe(url) {
     try {
-        const response = await fetch(url, { headers: DEFAULT_HEADERS });
-        const html = await response.text();
+        const html = await fetch(url, { headers: DEFAULT_HEADERS }).then(r => r.text());
+        const match = html.match(/https?:\/\/[^'"<>]+/g);
+        if (!match) return null;
 
-        // Find the redirect/landing URL
-        const pattern = /https?:\/\/[^'"<>]+/g;
-        const matches = html.match(pattern);
-        if (!matches) return null;
+        const redirectUrl = match[0];
+        const res = await fetch(redirectUrl, { headers: { ...DEFAULT_HEADERS, 'Referer': new URL(redirectUrl).origin + '/' } }).then(r => r.text());
+        const $ = cheerio.load(res);
 
-        const redirectUrl = matches[0];
-        const urlObj = new URL(redirectUrl);
-        
-        const redirectHeaders = {
-            ...DEFAULT_HEADERS,
-            'Referer': `${urlObj.protocol}//${urlObj.host}/`
-        };
-
-        const redirectResponse = await fetch(redirectUrl, { headers: redirectHeaders });
-        const redirectHtml = await redirectResponse.text();
-        const $ = cheerio.load(redirectHtml);
-
-        // Extract from application/json script tag
-        const scriptTag = $('script[type="application/json"]').first();
-        if (scriptTag.length > 0) {
-            let raw = scriptTag.html().trim();
-            if (raw.length > 4) {
-                const trimmed = raw.substring(2, raw.length - 2);
-                const decoded = voeDecoder.decode(trimmed);
-                if (decoded && decoded.source) {
-                    return decoded.source;
-                }
-            }
+        const script = $('script[type="application/json"]').first().html();
+        if (script && script.trim().length > 4) {
+            const data = voeDecoder.decode(script.trim().substring(2, script.trim().length - 2));
+            if (data?.source) return data.source;
         }
-
-        // Fallback: var a168c
-        const a168cMatch = redirectHtml.match(/var a168c='([^']+)'/);
-        if (a168cMatch) {
-            const decoded = Buffer.from(a168cMatch[1], 'base64').toString('utf-8');
-            const reversed = decoded.split('').reverse().join('');
-            const json = JSON.parse(reversed);
-            if (json.source) return json.source;
-        }
-
-    } catch (error) {
-        console.error(`[VOE Extractor] Error: ${error.message}`);
-    }
+    } catch (e) { console.error("[VOE Error]", e.message); }
     return null;
 }
 
 // ==========================================
-// 2. MAIN SCRAPER LOGIC
+// 2. VIDARA EXTRACTOR LOGIC
+// ==========================================
+
+async function extractVidara(urlStr) {
+    try {
+        const url = new URL(urlStr);
+        const html = await fetch(urlStr, { headers: DEFAULT_HEADERS }).then(r => r.text());
+        
+        const filecodeMatch = url.pathname.match(/\/(?:e|v|f)\/([a-zA-Z0-9]+)/);
+        if (!filecodeMatch) return null;
+        
+        const filecode = filecodeMatch[1];
+        const apiUrl = `${url.origin}/api/stream`;
+
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                ...DEFAULT_HEADERS,
+                'Content-Type': 'application/json',
+                'Referer': urlStr,
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify({ filecode, device: 'web' }),
+        }).then(r => r.json());
+
+        if (response?.streaming_url) {
+            return response.streaming_url;
+        }
+    } catch (e) { console.error("[Vidara Error]", e.message); }
+    return null;
+}
+
+// ==========================================
+// 3. MAIN SCRAPER
 // ==========================================
 
 async function getImdbId(tmdbId, type) {
     const targetType = type === 'series' ? 'tv' : 'movie';
-    const response = await fetch(`${TMDB_BASE_URL}/${targetType}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`);
-    const data = await response.json();
+    const data = await fetch(`${TMDB_BASE_URL}/${targetType}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`).then(r => r.json());
     return data?.imdb_id || null;
 }
 
-async function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) {
+async function getStreams(tmdbId, mediaType = 'movie') {
     const results = [];
-    
     try {
         const imdbId = await getImdbId(tmdbId, mediaType);
         if (!imdbId) return [];
 
-        // Step 1: Search Filmpalast via Autocomplete
-        const response = await fetch(`${BASE_URL}/autocomplete.php`, {
+        const searchRes = await fetch(`${BASE_URL}/autocomplete.php`, {
             method: 'POST',
-            headers: {
-                ...DEFAULT_HEADERS,
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'X-Requested-With': 'XMLHttpRequest'
-            },
+            headers: { ...DEFAULT_HEADERS, 'Content-Type': 'application/x-www-form-urlencoded' },
             body: `term=${encodeURIComponent(imdbId)}`
         });
-
-        const movieList = await response.json();
+        const movieList = await searchRes.json();
         if (!Array.isArray(movieList) || movieList.length === 0) return [];
 
-        const filteredResult = movieList.find(t => !t.toLowerCase().includes('english')) || movieList[0];
-        const searchPageURL = `${BASE_URL}/search/title/${encodeURIComponent(filteredResult)}`;
-
-        // Step 2: Find the stream page
-        const html = await fetch(searchPageURL, { headers: DEFAULT_HEADERS }).then(r => r.text());
+        const filtered = movieList.find(t => !t.toLowerCase().includes('english')) || movieList[0];
+        const html = await fetch(`${BASE_URL}/search/title/${encodeURIComponent(filtered)}`, { headers: DEFAULT_HEADERS }).then(r => r.text());
         const $ = cheerio.load(html);
 
-        let streamPageUrl;
-        const streamAnchor = $('a[href*="filmpalast.to/stream/"]').first();
-        if (streamAnchor.length > 0) {
-            const href = streamAnchor.attr('href');
-            streamPageUrl = href.startsWith('http') ? href : (href.startsWith('//') ? `https:${href}` : `${BASE_URL}${href}`);
+        let streamPageUrl = $('a[href*="filmpalast.to/stream/"]').first().attr('href');
+        if (streamPageUrl) {
+            streamPageUrl = streamPageUrl.startsWith('http') ? streamPageUrl : (streamPageUrl.startsWith('//') ? `https:${streamPageUrl}` : `${BASE_URL}${streamPageUrl}`);
         } else if (html.includes('currentStreamLinks')) {
-            streamPageUrl = searchPageURL;
+            streamPageUrl = `${BASE_URL}/search/title/${encodeURIComponent(filtered)}`;
         }
 
         if (!streamPageUrl) return [];
 
-        // Step 3: Extract and Filter VOE Links
         const streamHtml = await fetch(streamPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
         const $stream = cheerio.load(streamHtml);
-        const linkElements = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a');
+        const links = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a').toArray();
 
-        for (const element of linkElements.toArray()) {
-            const href = $stream(element).attr('href');
+        for (const el of links) {
+            const href = $(el).attr('href');
             if (!href || href === '#' || href.includes('javascript:void')) continue;
-
             const fullUrl = href.startsWith('http') ? href : (href.startsWith('//') ? `https:${href}` : `https://${href}`);
 
-            // ONLY process if it's a VOE link
+            let directLink = null;
+
             if (fullUrl.includes('voe.sx')) {
-                const directUrl = await extractVoe(fullUrl);
-                if (directUrl) {
-                    results.push({
-                        url: directUrl, // Direct .m3u8 link
-                        meta: {
-                            title: directUrl, // Show full URL as requested
-                            countryCodes: ['de']
-                        }
-                    });
-                }
+                directLink = await extractVoe(fullUrl);
+            } else if (/vidara\.(so|to)/.test(fullUrl)) {
+                directLink = await extractVidara(fullUrl);
+            }
+
+            if (directLink) {
+                results.push({
+                    url: directLink,
+                    meta: {
+                        title: directLink, // Shows the complete .m3u8 URL
+                        countryCodes: ['de']
+                    }
+                });
             }
         }
+    } catch (e) { console.error("[Filmpalast] Scraper Error:", e.message); }
 
-    } catch (error) {
-        console.error(`[Filmpalast] Scraper failed: ${error.message}`);
-    }
-
-    // Deduplicate results
     return results.filter((v, i, a) => a.findIndex(t => t.url === v.url) === i);
 }
-
-// ==========================================
-// 3. EXPORTS
-// ==========================================
 
 module.exports = { getStreams };
