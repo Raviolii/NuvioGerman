@@ -1,7 +1,7 @@
-// Filmpalast Scraper for Nuvio Local Scrapers
+// src/sources/filmpalast.js
 const cheerio = require('cheerio-without-node-native');
 
-// Import the VOE extractor from the specified path
+// Import the VOE extractor from the path you provided
 const { extractVoe } = require('../extractor/voe');
 
 const BASE_URL = 'https://filmpalast.to';
@@ -15,12 +15,11 @@ const DEFAULT_HEADERS = {
 
 // ================= HELPERS =================
 
-function getImdbId(tmdbId, type) {
+async function getImdbId(tmdbId, type) {
     const targetType = type === 'series' ? 'tv' : 'movie';
-    return fetch(`${TMDB_BASE_URL}/${targetType}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`)
-        .then(r => r.ok ? r.json() : null)
-        .then(data => data?.imdb_id || null)
-        .catch(() => null);
+    const response = await fetch(`${TMDB_BASE_URL}/${targetType}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`);
+    const data = await response.json();
+    return data?.imdb_id || null;
 }
 
 // ================= MAIN =================
@@ -32,7 +31,7 @@ async function getStreams(tmdbId, mediaType = 'movie', season = null, episode = 
         const imdbId = await getImdbId(tmdbId, mediaType);
         if (!imdbId) return [];
 
-        // Step 1: Autocomplete search via IMDB ID
+        // Step 1: Autocomplete search
         const response = await fetch(`${BASE_URL}/autocomplete.php`, {
             method: 'POST',
             headers: {
@@ -49,7 +48,7 @@ async function getStreams(tmdbId, mediaType = 'movie', season = null, episode = 
         const filteredResult = movieList.find(t => !t.toLowerCase().includes('english')) || movieList[0];
         const searchPageURL = `${BASE_URL}/search/title/${encodeURIComponent(filteredResult)}`;
 
-        // Step 2: Find the stream page
+        // Step 2: Find the main stream page
         const html = await fetch(searchPageURL, { headers: DEFAULT_HEADERS }).then(r => r.text());
         const $ = cheerio.load(html);
 
@@ -64,58 +63,44 @@ async function getStreams(tmdbId, mediaType = 'movie', season = null, episode = 
 
         if (!streamPageUrl) return [];
 
-        // Step 3: Extract and Filter Hoster Links
+        // Step 3: Extract and Parse VOE Links
         const streamHtml = await fetch(streamPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
         const $stream = cheerio.load(streamHtml);
         const linkElements = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a');
 
-        // Use for...of to handle the async calls to the VOE extractor
+        // We use a for...of loop to properly await the async extractor
         for (const element of linkElements.toArray()) {
             const href = $stream(element).attr('href');
             if (!href || href === '#' || href.includes('javascript:void')) continue;
 
             const fullUrl = href.startsWith('http') ? href : (href.startsWith('//') ? `https:${href}` : `https://${href}`);
 
-            // --- STRICT FILTER: ONLY PASS VOE LINKS ---
+            // ONLY process if it's a VOE link
             if (fullUrl.includes('voe.sx')) {
                 try {
-                    const extractedData = await extractVoe(fullUrl);
+                    const extractedStream = await extractVoe(fullUrl);
                     
-                    if (extractedData) {
-                        // If extractVoe returns an array of links
-                        if (Array.isArray(extractedData)) {
-                            extractedData.forEach(item => {
-                                results.push({
-                                    ...item,
-                                    meta: {
-                                        title: item.url || fullUrl, // Shows the stream URL as title
-                                        countryCodes: ['de']
-                                    }
-                                });
-                            });
-                        } else {
-                            // If extractVoe returns a single object
-                            results.push({
-                                ...extractedData,
-                                meta: {
-                                    title: extractedData.url || fullUrl,
-                                    countryCodes: ['de']
-                                }
-                            });
-                        }
+                    if (extractedStream && extractedStream.url) {
+                        results.push({
+                            url: extractedStream.url, // The direct .m3u8 link
+                            meta: {
+                                // Forces the direct URL to be the title in the UI
+                                title: extractedStream.url, 
+                                countryCodes: ['de']
+                            }
+                        });
                     }
                 } catch (e) {
-                    console.error(`[Filmpalast] VOE extraction failed for ${fullUrl}:`, e.message);
+                    console.error(`[Filmpalast] VOE extraction failed: ${e.message}`);
                 }
-            } 
-            // All other hosters are ignored as they don't match the VOE filter.
+            }
         }
 
     } catch (error) {
         console.error(`[Filmpalast] Scraper failed: ${error.message}`);
     }
 
-    // Deduplicate in case the same link appears twice on the page
+    // Deduplicate results
     return results.filter((v, i, a) => a.findIndex(t => t.url === v.url) === i);
 }
 
