@@ -37,7 +37,6 @@ function fetchAutocomplete(imdbId) {
     .then(r => r.ok ? r.json() : [])
     .then(movieList => {
         if (!Array.isArray(movieList) || movieList.length === 0) return null;
-        // Logic: prioritize non-English titles
         return movieList.find(t => !t.toLowerCase().includes('english')) || movieList[0];
     })
     .catch(() => null);
@@ -54,7 +53,6 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
 
             const searchPageURL = `${BASE_URL}/search/title/${encodeURIComponent(filteredResult)}`;
 
-            // Step 2: Find the Stream Page
             return fetch(searchPageURL, { headers: DEFAULT_HEADERS })
                 .then(r => r.ok ? r.text() : '')
                 .then(html => {
@@ -76,7 +74,6 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
 
                     if (!streamPageUrl) return [];
 
-                    // Step 3: Extract Hoster Links
                     return fetch(streamPageUrl, { headers: DEFAULT_HEADERS })
                         .then(r => r.ok ? r.text() : '')
                         .then(streamHtml => {
@@ -97,18 +94,17 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                                     else if (href.startsWith('//')) fullUrl = `https:${href}`;
                                     else fullUrl = `https://${href}`;
 
-                                    // Fix numeric or empty hoster names using the title attribute
                                     if (!hosterName || !isNaN(Number(hosterName))) {
                                         hosterName = $stream(element).attr('title') || 'Stream';
                                     }
 
                                     results.push({
-                                        // "name" is often what Nuvio shows in the list
-                                        name: `⌜ Filmpalast ⌟ | ${hosterName}`, 
-                                        // "title" is the specific string you requested from the meta logic
-                                        title: `${hosterName} (Filmpalast)`,
+                                        // Top line display
+                                        name: `⌜ Filmpalast ⌟ | ${hosterName}`,
+                                        // This is what will show the URL in the UI instead of the TMDB title
+                                        title: fullUrl, 
                                         url: fullUrl,
-                                        quality: 'HD',
+                                        quality: '', // Left blank to prevent "HD" from overriding the display
                                         provider: 'Filmpalast',
                                         headers: {
                                             'Referer': BASE_URL,
