@@ -1,27 +1,25 @@
-const scraper = require('./src/providers/filmpalast.js'); 
+// GitHub is case-sensitive! Ensure 'FilmpalastTo' matches the filename exactly.
+var scraper = require('./src/providers/FilmpalastTo.js'); 
 
 async function runTest() {
-    console.log("--- Starting Test ---");
-    
-    // Replace these with a real movie's TMDB ID
-    // Example: 603 is 'The Matrix'
-    const testId = "603"; 
-    const type = "movie";
-
+    console.log("--- Starting Test for Filmpalast ---");
     try {
-        const results = await scraper.getStreams(testId, type);
+        // Test with 'The Matrix' (TMDB ID: 603)
+        var results = await scraper.getStreams("603", "movie");
         
-        if (results.length === 0) {
-            console.log("❌ No results found.");
-        } else {
-            console.log(`✅ Success! Found ${results.length} streams:`);
-            results.forEach((res, index) => {
-                console.log(`\n[${index + 1}] Title: ${res.meta.title}`);
-                console.log(`    URL: ${res.url}`);
+        if (results && results.length > 0) {
+            console.log("✅ Success! Found " + results.length + " streams.");
+            results.forEach(function(res) {
+                console.log(" >> " + res.meta.title);
             });
+            process.exit(0);
+        } else {
+            console.log("❌ No streams found. (This might be an IP block by Filmpalast)");
+            process.exit(1);
         }
     } catch (err) {
         console.error("❌ Test Failed with Error:", err);
+        process.exit(1);
     }
 }
 
