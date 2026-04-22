@@ -1,0 +1,27 @@
+name: Scraper Test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: # Allows you to run it manually from the GitHub UI
+
+jobs:
+  test-scraper:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install cheerio-without-node-native
+
+      - name: Run Scraper Test
+        run: node test-scraper.js
