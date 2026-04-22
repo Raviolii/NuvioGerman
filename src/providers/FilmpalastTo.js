@@ -84,21 +84,40 @@ function voeDecode(ct, luts) {
 // ==========================================
 async function extractVoe(url) {
     try {
-        console.log("--- [START VOE DEBUG] ---");
+        console.log("[DEBUG-VOE] Step 1: Fetching Landing Page...");
         var response = await fetch(url, { headers: DEFAULT_HEADERS });
         var html = await response.text();
 
-        // FULL HTML DUMP
-        console.log("FULL HTML OUTPUT START:\n" + html + "\nFULL HTML OUTPUT END");
+        // 1. Check for the Redirect Script
+        var redirectMatch = html.match(/window\.location\.href\s*=\s*['"](https:\/\/[^'"]+)['"]/i);
+        
+        if (redirectMatch && redirectMatch[1].indexOf('voe.sx') === -1) {
+            var middlemanUrl = redirectMatch[1];
+            console.log("[DEBUG-VOE] Step 2: Following Redirect to -> " + middlemanUrl);
+            
+            // Fetch the middleman (charlestoughrace.com or similar)
+            // We must update the Referer to the original VOE URL
+            var middleRes = await fetch(middlemanUrl, { 
+                headers: Object.assign({}, DEFAULT_HEADERS, { 'Referer': url }) 
+            });
+            
+            // The middleman usually redirects back to VOE automatically.
+            // If your fetch environment follows 302 redirects, middleRes.url will be the NEW VOE URL.
+            var finalVoeUrl = middleRes.url;
+            console.log("[DEBUG-VOE] Step 3: Arrived at Video Page -> " + finalVoeUrl);
+            
+            var finalHtml = await middleRes.text();
+            html = finalHtml; // Swap the HTML with the actual video player HTML
+        }
 
-        // Look for the specific JSON payload
+        // 2. Now run the standard LaMovie Extraction on the NEW HTML
         var rMain = html.match(/json">\s*\[?\s*['"]([^'"]+)['"]\s*\]?\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i);
         
         if (rMain) {
             var encodedPayload = rMain[1];
             var loaderUrl = resolveRelativeUrl(rMain[2], url);
             
-            console.log("MATCH FOUND. JS LOADER: " + loaderUrl);
+            console.log("[DEBUG-VOE] Payload Found. Fetching LUT script...");
             
             var jsRes = await fetch(loaderUrl, { headers: { 'Referer': url } });
             var jsData = await jsRes.text();
@@ -113,18 +132,15 @@ async function extractVoe(url) {
                 }
             }
         } else {
-            console.log("REGEX FAILED: Could not find 'json' script tag.");
-        }
-
-        // Fallback check for direct M3U8 links in the HTML
-        var m3u8Match = html.match(/['"](https:\/\/[^'"]+\.m3u8[^'"]*)['"]/i);
-        if (m3u8Match) {
-            console.log("FALLBACK SUCCESS: Found .m3u8 link directly.");
-            return m3u8Match[1];
+            // Last ditch effort: Look for the 'wc' fallback if regex fails
+            var wcMatch = html.match(/window\.wc\s*=\s*['"]([^'"]+)['"]/);
+            if (wcMatch) return b64decode(wcMatch[1]);
+            
+            console.log("[DEBUG-VOE] FAILED: Still no payload. View HTML snippet: " + html.substring(0, 200));
         }
 
     } catch (e) {
-        console.log("VOE EXCEPTION: " + e.message);
+        console.log("[DEBUG-VOE] Exception: " + e.message);
     }
     return null;
 }
