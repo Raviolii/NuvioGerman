@@ -1,5 +1,4 @@
 // Filmpalast Scraper for Nuvio Local Scrapers
-// Uses IMDB ID for high-accuracy searching via Autocomplete
 
 const cheerio = require('cheerio-without-node-native');
 
@@ -14,10 +13,6 @@ const DEFAULT_HEADERS = {
 
 // ================= HELPERS =================
 
-/**
- * Nuvio provides TMDB IDs. We convert it to IMDB ID 
- * because Filmpalast's autocomplete supports IMDB IDs (tt12345) directly.
- */
 function getImdbId(tmdbId, type) {
     const targetType = type === 'series' ? 'tv' : 'movie';
     return fetch(`${TMDB_BASE_URL}/${targetType}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`)
@@ -26,9 +21,6 @@ function getImdbId(tmdbId, type) {
         .catch(() => null);
 }
 
-/**
- * Step 1: Search Filmpalast via Autocomplete using IMDB ID
- */
 function fetchAutocomplete(imdbId) {
     const url = `${BASE_URL}/autocomplete.php`;
     const body = `term=${encodeURIComponent(imdbId)}`;
@@ -45,8 +37,6 @@ function fetchAutocomplete(imdbId) {
     .then(r => r.ok ? r.json() : [])
     .then(movieList => {
         if (!Array.isArray(movieList) || movieList.length === 0) return null;
-        
-        // Per original logic: filter out English titles to prioritize German streams
         return movieList.find(t => !t.toLowerCase().includes('english')) || movieList[0];
     })
     .catch(() => null);
@@ -63,7 +53,6 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
 
             const searchPageURL = `${BASE_URL}/search/title/${encodeURIComponent(filteredResult)}`;
 
-            // Step 2: Find the Stream Page URL
             return fetch(searchPageURL, { headers: DEFAULT_HEADERS })
                 .then(r => r.ok ? r.text() : '')
                 .then(html => {
@@ -85,14 +74,19 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
 
                     if (!streamPageUrl) return [];
 
-                    // Step 3: Extract Hoster Links (Vivo, Mixdrop, etc)
+                    // Step 3: Extract Title and Hoster Links
                     return fetch(streamPageUrl, { headers: DEFAULT_HEADERS })
                         .then(r => r.ok ? r.text() : '')
                         .then(streamHtml => {
                             const $stream = cheerio.load(streamHtml);
                             const results = [];
                             
-                            // Selectors from your original source code
+                            // --- NEW: Extract the actual title from the page ---
+                            // Usually found in <h2 class="glow"> or within the breadcrumbs/header
+                            const actualTitle = $stream('h2.glow').first().text().trim() || 
+                                               $stream('h1').first().text().trim() || 
+                                               filteredResult;
+
                             const linkElements = $stream(
                                 '.currentStreamLinks a, .hosterSite span a, .streamList a'
                             );
@@ -107,14 +101,13 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                                     else if (href.startsWith('//')) fullUrl = `https:${href}`;
                                     else fullUrl = `https://${href}`;
 
-                                    // Fallback for hoster name if text is numeric/empty
                                     if (!hosterName || !isNaN(Number(hosterName))) {
                                         hosterName = $stream(element).attr('title') || 'Stream';
                                     }
 
                                     results.push({
                                         name: `⌜ Filmpalast ⌟ | ${hosterName}`,
-                                        title: filteredResult,
+                                        title: actualTitle, // Using the extracted page title here
                                         url: fullUrl,
                                         quality: 'HD',
                                         provider: 'Filmpalast',
