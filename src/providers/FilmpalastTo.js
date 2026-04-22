@@ -32,7 +32,6 @@ function b64decode(str) {
         }
         return result;
     } catch(e) { 
-        console.log("[DEBUG-B64] Error decoding string: " + e.message);
         return null; 
     }
 }
@@ -47,12 +46,10 @@ function resolveRelativeUrl(href, base) {
 }
 
 // ==========================================
-// 2. VOE DECODER (With Internal Debugging)
+// 2. VOE DECODER
 // ==========================================
 function voeDecode(ct, luts) {
     try {
-        console.log("[DEBUG-VOE] Starting Decode. Payload Length: " + ct.length);
-        
         var rawLuts = luts.replace(/^\[|\]$/g, "").split("','").map(function(s) {
             return s.replace(/^'+|'+$/g, "");
         });
@@ -60,7 +57,6 @@ function voeDecode(ct, luts) {
             return i.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         });
 
-        // Step 1: Alpha Rotation
         var txt = "";
         for (var ci = 0; ci < ct.length; ci++) {
             var x = ct.charCodeAt(ci);
@@ -68,56 +64,43 @@ function voeDecode(ct, luts) {
             else if (x > 96 && x < 123) x = ((x - 97 + 13) % 26) + 97;
             txt += String.fromCharCode(x);
         }
-        console.log("[DEBUG-VOE] Step 1 (Rotation) Complete.");
 
-        // Step 2: Junk Scrubbing
         for (var pi = 0; pi < escapedLuts.length; pi++) {
             txt = txt.replace(new RegExp(escapedLuts[pi], "g"), "");
         }
-        console.log("[DEBUG-VOE] Step 2 (Scrubbing) Complete.");
 
-        // Step 3: First B64 Pass
         var decoded1 = b64decode(txt);
-        if (!decoded1) throw new Error("First Base64 decode failed");
+        if (!decoded1) return null;
 
-        // Step 4: Shift-Back Logic
         var step4 = "";
         for (var si = 0; si < decoded1.length; si++) {
             step4 += String.fromCharCode((decoded1.charCodeAt(si) - 3 + 256) % 256);
         }
-        console.log("[DEBUG-VOE] Step 4 (Shift-Back) Complete.");
 
-        // Step 5: Reverse & Final Pass
         var revBase64 = step4.split("").reverse().join("");
         var finalStr = b64decode(revBase64);
-        
-        if (!finalStr) throw new Error("Final Base64 decode failed");
-        
-        var json = JSON.parse(finalStr);
-        console.log("[DEBUG-VOE] SUCCESS. Source: " + (json.source || json.direct_access_url));
-        return json;
+        return finalStr ? JSON.parse(finalStr) : null;
     } catch (e) {
-        console.log("[DEBUG-VOE] Decode Logic Exception: " + e.message);
         return null;
     }
 }
 
 // ==========================================
-// 3. EXTRACTORS (With HTTP Debugging)
+// 3. EXTRACTORS
 // ==========================================
+
+// --- VOE ---
 async function extractVoe(url) {
     try {
-        console.log("[DEBUG-VOE] Fetching Embed: " + url);
+        console.log("[DEBUG-VOE] Fetching: " + url);
         var response = await fetch(url, { headers: DEFAULT_HEADERS });
         var html = await response.text();
 
-        // Regex for the encoded JSON block and the script loader
         var rMain = html.match(/json">\s*\[?\s*['"]([^'"]+)['"]\s*\]?\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i);
         
         if (rMain) {
             var encodedPayload = rMain[1];
             var loaderUrl = resolveRelativeUrl(rMain[2], url);
-            console.log("[DEBUG-VOE] Found Payload. Fetching LUT script: " + loaderUrl);
             
             var jsRes = await fetch(loaderUrl, { headers: { 'Referer': url } });
             var jsData = await jsRes.text();
@@ -130,45 +113,69 @@ async function extractVoe(url) {
                 if (decoded && (decoded.source || decoded.direct_access_url)) {
                     return decoded.source || decoded.direct_access_url;
                 }
-            } else {
-                console.log("[DEBUG-VOE] FAILED: Could not extract LUT array from JS loader.");
             }
-        } else {
-            console.log("[DEBUG-VOE] FAILED: Payload regex not matched in HTML.");
-        }
-
-        // Final Fallback
-        console.log("[DEBUG-VOE] Attempting Fallback Regex...");
-        var re = /(?:mp4|hls|file)['"\s]*:\s*['"]([^'"]+)['"]/gi;
-        var m;
-        while ((m = re.exec(html)) !== null) {
-            var candidate = m[1];
-            if (candidate && candidate.length > 10) return candidate.indexOf("aHR0") === 0 ? b64decode(candidate) : candidate;
         }
     } catch (e) {
-        console.log("[DEBUG-VOE] Extraction Exception: " + e.message);
+        console.log("[DEBUG-VOE] Error: " + e.message);
+    }
+    return null;
+}
+
+// --- VIDARA ---
+async function extractVidara(urlStr) {
+    try {
+        console.log("[DEBUG-Vidara] Extracting: " + urlStr);
+        var filecodeMatch = urlStr.match(/\/(?:e|v|f)\/([a-zA-Z0-9]+)/);
+        if (!filecodeMatch) return null;
+
+        var apiBase = urlStr.split('/')[0] + '//' + urlStr.split('/')[2];
+        
+        // Fetch embed page to get session tokens/keys
+        var pageRes = await fetch(urlStr, { headers: DEFAULT_HEADERS });
+        var pageHtml = await pageRes.text();
+        
+        var tokenMatch = pageHtml.match(/key:\s*['"]([^'"]+)['"]/i);
+        var token = tokenMatch ? tokenMatch[1] : null;
+
+        var response = await fetch(apiBase + '/api/stream', {
+            method: 'POST',
+            headers: {
+                'User-Agent': DEFAULT_HEADERS['User-Agent'],
+                'Content-Type': 'application/json',
+                'Referer': urlStr,
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({ 
+                filecode: filecodeMatch[1], 
+                device: 'web',
+                key: token 
+            })
+        });
+
+        var data = await response.json();
+        var streamUrl = data && (data.streaming_url || data.url);
+        if (streamUrl) {
+            console.log("[DEBUG-Vidara] SUCCESS");
+            return streamUrl;
+        }
+    } catch (e) { 
+        console.log("[DEBUG-Vidara] Error: " + e.message); 
     }
     return null;
 }
 
 // ==========================================
-// 4. MAIN SCRAPER (With Flow Debugging)
+// 4. MAIN SCRAPER
 // ==========================================
 async function getStreams(tmdbId, mediaType) {
     var results = [];
-    console.log("[DEBUG-FP] START Scrape for ID: " + tmdbId);
+    console.log("[DEBUG-FP] START Scrape for: " + tmdbId);
     
     try {
-        // Step 1: ID Conversion
         var tmdbUrl = TMDB_BASE_URL + '/' + (mediaType === 'series' ? 'tv' : 'movie') + '/' + tmdbId + '/external_ids?api_key=' + TMDB_API_KEY;
         var idData = await fetch(tmdbUrl).then(r => r.json());
-        if (!idData.imdb_id) {
-            console.log("[DEBUG-FP] FAILED: No IMDB ID found on TMDB.");
-            return [];
-        }
-        console.log("[DEBUG-FP] IMDB ID: " + idData.imdb_id);
+        if (!idData.imdb_id) return [];
 
-        // Step 2: Search
         var searchRes = await fetch(BASE_URL + '/autocomplete.php', {
             method: 'POST',
             headers: { 'User-Agent': DEFAULT_HEADERS['User-Agent'], 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -176,39 +183,21 @@ async function getStreams(tmdbId, mediaType) {
         });
         
         var movieList = await searchRes.json();
-        if (!movieList || movieList.length === 0) {
-            console.log("[DEBUG-FP] FAILED: No results in autocomplete for " + idData.imdb_id);
-            return [];
-        }
+        if (!movieList || movieList.length === 0) return [];
         
         var targetTitle = movieList.find(t => t.toLowerCase().indexOf('english') === -1) || movieList[0];
-        console.log("[DEBUG-FP] Selected Title: " + targetTitle);
-
-        // Step 3: Stream Page Discovery
         var searchPageUrl = BASE_URL + '/search/title/' + encodeURIComponent(targetTitle);
         var searchHtml = await fetch(searchPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
         var $search = cheerio.load(searchHtml);
         
         var streamAnchor = $search('a[href*="/stream/"]').first();
-        var streamPageUrl = null;
+        var streamPageUrl = streamAnchor.length > 0 ? BASE_URL + streamAnchor.attr('href').replace('/filmpalast.to', '') : (searchHtml.indexOf('currentStreamLinks') !== -1 ? searchPageUrl : null);
 
-        if (streamAnchor.length > 0) {
-            streamPageUrl = BASE_URL + streamAnchor.attr('href').replace('/filmpalast.to', '');
-        } else if (searchHtml.indexOf('currentStreamLinks') !== -1) {
-            streamPageUrl = searchPageUrl;
-        }
+        if (!streamPageUrl) return [];
 
-        if (!streamPageUrl) {
-            console.log("[DEBUG-FP] FAILED: Could not find stream page link.");
-            return [];
-        }
-        console.log("[DEBUG-FP] Stream Page: " + streamPageUrl);
-
-        // Step 4: Link Extraction
         var streamPageHtml = await fetch(streamPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
         var $stream = cheerio.load(streamPageHtml);
         var anchors = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a').toArray();
-        console.log("[DEBUG-FP] Found " + anchors.length + " potential hoster links.");
 
         for (var i = 0; i < anchors.length; i++) {
             var aHref = $stream(anchors[i]).attr('href');
@@ -216,18 +205,22 @@ async function getStreams(tmdbId, mediaType) {
             
             var fullUrl = aHref.indexOf('//') === 0 ? 'https:' + aHref : (aHref.indexOf('http') === 0 ? aHref : 'https://' + aHref);
             
+            // --- Logic for VOE ---
             if (fullUrl.indexOf('voe.sx') !== -1) {
                 var direct = await extractVoe(fullUrl);
-                if (direct) {
-                    results.push({ url: direct, meta: { title: "VOE \xB7 1080p", countryCodes: ['de'] } });
-                }
+                if (direct) results.push({ url: direct, meta: { title: "VOE \xB7 1080p", countryCodes: ['de'] } });
+            } 
+            // --- Logic for Vidara/Vidfast ---
+            else if (fullUrl.indexOf('vidara.') !== -1 || fullUrl.indexOf('vidfast.') !== -1) {
+                var direct = await extractVidara(fullUrl);
+                if (direct) results.push({ url: direct, meta: { title: "Vidara \xB7 1080p", countryCodes: ['de'] } });
             }
         }
     } catch (e) { 
         console.log("[DEBUG-FP] Fatal Error: " + e.message); 
     }
 
-    console.log("[DEBUG-FP] FINISHED. Total Streams: " + results.length);
+    console.log("[DEBUG-FP] FINISHED. Found: " + results.length);
     return results;
 }
 
