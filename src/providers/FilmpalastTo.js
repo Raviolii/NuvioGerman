@@ -10,7 +10,7 @@ var DEFAULT_HEADERS = {
 };
 
 // ==========================================
-// 1. VOE DECODER (Strict ES5)
+// 1. VOE DECODER
 // ==========================================
 
 var voeDecoder = {
@@ -20,7 +20,6 @@ var voeDecoder = {
             return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
         });
     },
-
     replaceJunk: function(input) {
         var junkParts = ["@$", "^^", "~@", "%?", "*~", "!!", "#&"];
         var result = input;
@@ -29,15 +28,11 @@ var voeDecoder = {
         }
         return result.replace(/_/g, "");
     },
-
     shiftBack: function(s, n) {
         var res = "";
-        for (var i = 0; i < s.length; i++) {
-            res += String.fromCharCode(s.charCodeAt(i) - n);
-        }
+        for (var i = 0; i < s.length; i++) { res += String.fromCharCode(s.charCodeAt(i) - n); }
         return res;
     },
-
     decode: function(encoded) {
         try {
             var s1 = this.shiftLetters(encoded);
@@ -47,9 +42,7 @@ var voeDecoder = {
             var reversed = s4.split('').reverse().join('');
             var s5 = Buffer.from(reversed, 'base64').toString('utf-8');
             return JSON.parse(s5);
-        } catch (e) {
-            return null;
-        }
+        } catch (e) { return null; }
     }
 };
 
@@ -66,13 +59,9 @@ async function extractVoe(url) {
 
         var redirectUrl = matches[0];
         var redirectRes = await fetch(redirectUrl, { 
-            headers: { 
-                'User-Agent': DEFAULT_HEADERS['User-Agent'],
-                'Referer': redirectUrl
-            } 
+            headers: { 'User-Agent': DEFAULT_HEADERS['User-Agent'], 'Referer': redirectUrl } 
         });
         var resHtml = await redirectRes.text();
-        
         var $ = cheerio.load(resHtml);
         var scriptTag = $('script[type="application/json"]').first();
         var scriptContent = scriptTag.html();
@@ -90,7 +79,6 @@ async function extractVidara(urlStr) {
     try {
         var filecodeMatch = urlStr.match(/\/(?:e|v|f)\/([a-zA-Z0-9]+)/);
         if (!filecodeMatch) return null;
-        
         var filecode = filecodeMatch[1];
         var urlParts = urlStr.split('/');
         var apiBase = urlParts[0] + '//' + urlParts[2];
@@ -126,11 +114,19 @@ async function getStreams(tmdbId, mediaType) {
         var imdbId = idData.imdb_id;
         if (!imdbId) return [];
 
+        // SEARCH
         var searchRes = await fetch(BASE_URL + '/autocomplete.php', {
             method: 'POST',
             headers: { 'User-Agent': DEFAULT_HEADERS['User-Agent'], 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'term=' + encodeURIComponent(imdbId)
         });
+        
+        // If this returns 403 or 404, GitHub is blocked.
+        if (searchRes.status !== 200) {
+            console.log("[DEBUG] Filmpalast blocked search. Status: " + searchRes.status);
+            return [];
+        }
+
         var movieList = await searchRes.json();
         if (!movieList || movieList.length === 0) return [];
 
@@ -159,21 +155,30 @@ async function getStreams(tmdbId, mediaType) {
 
             var fullUrl = href.indexOf('//') === 0 ? 'https:' + href : (href.indexOf('http') === 0 ? href : 'https://' + href);
             var direct = null;
+            var hosterLabel = "";
 
             if (fullUrl.indexOf('voe.sx') !== -1) {
+                hosterLabel = "VOE";
                 direct = await extractVoe(fullUrl);
             } else if (fullUrl.indexOf('vidara.') !== -1) {
+                hosterLabel = "Vidara";
                 direct = await extractVidara(fullUrl);
             }
 
             if (direct) {
                 results.push({
                     url: direct,
-                    meta: { title: direct, countryCodes: ['de'] }
+                    meta: { 
+                        // Now includes the Hoster name in the title
+                        title: "[" + hosterLabel + "] " + direct, 
+                        countryCodes: ['de'] 
+                    }
                 });
             }
         }
-    } catch (e) {}
+    } catch (e) {
+        console.log("[DEBUG] Scraper Error: " + e.message);
+    }
 
     return results;
 }
