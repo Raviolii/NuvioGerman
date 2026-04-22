@@ -5,7 +5,7 @@ async function runTest() {
     console.log("--- Starting Test for Filmpalast ---");
     try {
         // Test with 'The Matrix' (TMDB ID: 603)
-        var results = await scraper.getStreams("603", "movie");
+        var results = await scraper.getStreams("1226863", "movie");
         
         if (results && results.length > 0) {
             console.log("✅ Success! Found " + results.length + " streams.");
