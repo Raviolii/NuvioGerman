@@ -1,122 +1,122 @@
-// Filmpalast Scraper for Nuvio Local Scrapers
 const cheerio = require('cheerio-without-node-native');
 
-// Import the VOE extractor from the specified path
-const { extractVoe } = require('../extractors/voe');
+/**
+ * VOE Extractor for Nuvio
+ * Decodes the complex obfuscation used by voe.sx to find the .m3u8 source.
+ */
 
-const BASE_URL = 'https://filmpalast.to';
-const TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
-const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
+// --- DECODING HELPERS ---
 
-const DEFAULT_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-    'Referer': BASE_URL
-};
-
-// ================= HELPERS =================
-
-function getImdbId(tmdbId, type) {
-    const targetType = type === 'series' ? 'tv' : 'movie';
-    return fetch(`${TMDB_BASE_URL}/${targetType}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`)
-        .then(r => r.ok ? r.json() : null)
-        .then(data => data?.imdb_id || null)
-        .catch(() => null);
+function shiftLetters(input) {
+    return input.replace(/[a-zA-Z]/g, (c) => {
+        const base = c <= 'Z' ? 65 : 97;
+        return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+    });
 }
 
-// ================= MAIN =================
+function replaceJunk(input) {
+    const junkParts = ["@$", "^^", "~@", "%?", "*~", "!!", "#&"];
+    let result = input;
+    junkParts.forEach(junk => {
+        result = result.split(junk).join("_");
+    });
+    return result.replace(/_/g, "");
+}
 
-async function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) {
-    const results = [];
-    
+function shiftBack(s, n) {
+    return Array.from(s)
+        .map(c => String.fromCharCode(c.charCodeAt(0) - n))
+        .join('');
+}
+
+function decodeVoeString(encoded) {
     try {
-        const imdbId = await getImdbId(tmdbId, mediaType);
-        if (!imdbId) return [];
+        // Step 1: ROT13
+        let step1 = shiftLetters(encoded);
+        // Step 2: Junk removal
+        let step2 = replaceJunk(step1);
+        // Step 3: Base64 decode
+        let step3 = Buffer.from(step2, 'base64').toString('utf-8');
+        // Step 4: CharCode Shift
+        let step4 = shiftBack(step3, 3);
+        // Step 5: Reverse and Base64 decode again
+        let reversed = step4.split('').reverse().join('');
+        let step5 = Buffer.from(reversed, 'base64').toString('utf-8');
+        
+        return JSON.parse(step5);
+    } catch (e) {
+        return null;
+    }
+}
 
-        // Step 1: Autocomplete search via IMDB ID
-        const response = await fetch(`${BASE_URL}/autocomplete.php`, {
-            method: 'POST',
-            headers: {
-                ...DEFAULT_HEADERS,
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            body: `term=${encodeURIComponent(imdbId)}`
-        });
+// --- MAIN EXTRACTOR ---
 
-        const movieList = await response.json();
-        if (!Array.isArray(movieList) || movieList.length === 0) return [];
+async function extractVoe(url) {
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+    };
 
-        const filteredResult = movieList.find(t => !t.toLowerCase().includes('english')) || movieList[0];
-        const searchPageURL = `${BASE_URL}/search/title/${encodeURIComponent(filteredResult)}`;
+    try {
+        // First Request: Get the landing/redirect page
+        const response = await fetch(url, { headers });
+        const html = await response.text();
 
-        // Step 2: Find the stream page
-        const html = await fetch(searchPageURL, { headers: DEFAULT_HEADERS }).then(r => r.text());
-        const $ = cheerio.load(html);
+        // Find the actual video page URL (regex pattern from your Swift code)
+        const pattern = /https?:\/\/[^'"<>]+/g;
+        const matches = html.match(pattern);
+        if (!matches || matches.length === 0) return null;
 
-        let streamPageUrl;
-        const streamAnchor = $('a[href*="filmpalast.to/stream/"]').first();
-        if (streamAnchor.length > 0) {
-            const href = streamAnchor.attr('href');
-            streamPageUrl = href.startsWith('http') ? href : (href.startsWith('//') ? `https:${href}` : `${BASE_URL}${href}`);
-        } else if (html.includes('currentStreamLinks')) {
-            streamPageUrl = searchPageURL;
+        const redirectUrl = matches[0];
+        const urlObj = new URL(redirectUrl);
+        
+        // Prepare headers for the second request (including Referer)
+        const redirectHeaders = {
+            ...headers,
+            'Referer': `${urlObj.protocol}//${urlObj.host}/`
+        };
+
+        // Second Request: Get the page containing the script tag
+        const redirectResponse = await fetch(redirectUrl, { headers: redirectHeaders });
+        const redirectHtml = await redirectResponse.text();
+        const $ = cheerio.load(redirectHtml);
+
+        // Logic 1: application/json script tag (Main Logic)
+        const scriptTag = $('script[type="application/json"]').first();
+        if (scriptTag.length > 0) {
+            let raw = scriptTag.html().trim();
+            // Equivalent to Python [2:-2] / Swift offset logic
+            if (raw.length > 4) {
+                const trimmed = raw.substring(2, raw.length - 2);
+                const decoded = decodeVoeString(trimmed);
+                if (decoded && decoded.source) {
+                    return { url: decoded.source, quality: 'HD' };
+                }
+            }
         }
 
-        if (!streamPageUrl) return [];
+        // Fallback 1: var a168c Base64
+        const a168cMatch = redirectHtml.match(/var a168c='([^']+)'/);
+        if (a168cMatch) {
+            const decoded = Buffer.from(a168cMatch[1], 'base64').toString('utf-8');
+            const reversed = decoded.split('').reverse().join('');
+            try {
+                const json = JSON.parse(reversed);
+                if (json.source) return { url: json.source, quality: 'HD' };
+            } catch (e) {}
+        }
 
-        // Step 3: Extract and Filter Hoster Links
-        const streamHtml = await fetch(streamPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
-        const $stream = cheerio.load(streamHtml);
-        const linkElements = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a');
-
-        // Use for...of to handle the async calls to the VOE extractor
-        for (const element of linkElements.toArray()) {
-            const href = $stream(element).attr('href');
-            if (!href || href === '#' || href.includes('javascript:void')) continue;
-
-            const fullUrl = href.startsWith('http') ? href : (href.startsWith('//') ? `https:${href}` : `https://${href}`);
-
-            // --- STRICT FILTER: ONLY PASS VOE LINKS ---
-            if (fullUrl.includes('voe.sx')) {
-                try {
-                    const extractedData = await extractVoe(fullUrl);
-                    
-                    if (extractedData) {
-                        // If extractVoe returns an array of links
-                        if (Array.isArray(extractedData)) {
-                            extractedData.forEach(item => {
-                                results.push({
-                                    ...item,
-                                    meta: {
-                                        title: item.url || fullUrl, // Shows the stream URL as title
-                                        countryCodes: ['de']
-                                    }
-                                });
-                            });
-                        } else {
-                            // If extractVoe returns a single object
-                            results.push({
-                                ...extractedData,
-                                meta: {
-                                    title: extractedData.url || fullUrl,
-                                    countryCodes: ['de']
-                                }
-                            });
-                        }
-                    }
-                } catch (e) {
-                    console.error(`[Filmpalast] VOE extraction failed for ${fullUrl}:`, e.message);
-                }
-            } 
-            // All other hosters are ignored as they don't match the VOE filter.
+        // Fallback 2: 'hls' Base64
+        const hlsMatch = redirectHtml.match(/'hls': '([^']+)'/);
+        if (hlsMatch) {
+            const hlsUrl = Buffer.from(hlsMatch[1], 'base64').toString('utf-8');
+            return { url: hlsUrl, quality: 'HD' };
         }
 
     } catch (error) {
-        console.error(`[Filmpalast] Scraper failed: ${error.message}`);
+        console.error(`[VOE Extractor] Error: ${error.message}`);
     }
 
-    // Deduplicate in case the same link appears twice on the page
-    return results.filter((v, i, a) => a.findIndex(t => t.url === v.url) === i);
+    return null;
 }
 
-module.exports = { getStreams };
+module.exports = { extractVoe };
