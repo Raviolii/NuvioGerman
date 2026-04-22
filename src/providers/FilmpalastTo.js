@@ -3,6 +3,8 @@ var cheerio = require('cheerio-without-node-native');
 var BASE_URL = 'https://filmpalast.to';
 var TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
 var TMDB_BASE_URL = 'https://api.themoviedb.org/3';
+
+// High-compatibility User-Agent
 var UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36';
 
 var DEFAULT_HEADERS = {
@@ -12,8 +14,14 @@ var DEFAULT_HEADERS = {
     'Referer': BASE_URL
 };
 
+// Mirror domains from the VOE SDK
+var VOE_MIRRORS = [
+    'voe.sx', 'chuckle-tube.com', 'goofy-banana.com', 'smoki.cc', 'kinoger.ru', 
+    'v-o-e-unblock.com', 'reputationsheriffkennethsand.com', '19turanosephantasia.com'
+];
+
 // ==========================================
-// 1. VOE DECODER (Ported from Swift Logic)
+// 1. VOE DECODER
 // ==========================================
 var voeDecoder = {
     shiftLetters: function(input) {
@@ -32,9 +40,7 @@ var voeDecoder = {
     },
     shiftBack: function(s, n) {
         var res = "";
-        for (var i = 0; i < s.length; i++) { 
-            res += String.fromCharCode(s.charCodeAt(i) - n); 
-        }
+        for (var i = 0; i < s.length; i++) { res += String.fromCharCode(s.charCodeAt(i) - n); }
         return res;
     },
     decode: function(encoded) {
@@ -54,64 +60,71 @@ var voeDecoder = {
 // 2. EXTRACTORS
 // ==========================================
 
-async function extractVoe(url) {
+async function extractVoe(urlStr) {
     try {
-        console.log("[VOE] Fetching landing page...");
-        var response = await fetch(url, { headers: DEFAULT_HEADERS });
+        console.log("[VOE] Initiating extraction for: " + urlStr);
+        var urlObj = new URL(urlStr);
+        
+        // Step 1: Landing Page Fetch
+        var response = await fetch(urlStr, { headers: DEFAULT_HEADERS });
         var html = await response.text();
         
-        // Match redirect URL from HTML
-        var pattern = /https?:\/\/[^'"<>]+/g;
-        var matches = html.match(pattern);
-        if (!matches) return null;
+        // Check for JS Redirects (window.location.href)
+        var redirectMatch = html.match(/window\.location\.href\s*=\s*'([^']+)/);
+        var redirectUrl = redirectMatch ? redirectMatch[1] : null;
 
-        var redirectUrlString = matches[0];
-        console.log("[VOE] Redirect URL found: " + redirectUrlString);
+        if (!redirectUrl) {
+            var pattern = /https?:\/\/[^'"<>]+/g;
+            var matches = html.match(pattern);
+            if (matches) redirectUrl = matches[0];
+        }
 
-        // Swift-specific Referer construction
-        var parts = redirectUrlString.split("/");
+        if (!redirectUrl) redirectUrl = urlStr;
+
+        // Construct headers with Swift-style Referer
+        var parts = redirectUrl.split("/");
         var customHeaders = Object.assign({}, DEFAULT_HEADERS);
         if (parts.length > 2) {
             customHeaders["Referer"] = parts[0] + "//" + parts[2] + "/";
         }
 
-        var redirectRes = await fetch(redirectUrlString, { headers: customHeaders });
+        console.log("[VOE] Fetching Player with Referer: " + customHeaders["Referer"]);
+        var redirectRes = await fetch(redirectUrl, { headers: customHeaders });
         var redirectHtml = await redirectRes.text();
 
-        // METHOD 1: JSON Script Tag
+        // METHOD 1: application/json script tag
         var $ = cheerio.load(redirectHtml);
         var script = $('script[type="application/json"]').first().html();
         if (script && script.trim().length > 4) {
             var trimmed = script.trim();
-            // Swift equivalent of [2:-2]
             var decoded = voeDecoder.decode(trimmed.substring(2, trimmed.length - 2));
             if (decoded && decoded.source) {
-                console.log("[VOE] Success via JSON Script");
+                console.log("[VOE] Success: Method 1");
                 return decoded.source;
             }
         }
 
-        // METHOD 2: base64 var a168c (Fallback from Swift)
+        // METHOD 2: var a168c (Base64 + Reversed)
         var a168Match = redirectHtml.match(/var a168c='([^']+)'/);
         if (a168Match) {
             var decodedStr = Buffer.from(a168Match[1], 'base64').toString('utf-8');
             var reversed = decodedStr.split('').reverse().join('');
             var jsonObject = JSON.parse(reversed);
             if (jsonObject && jsonObject.source) {
-                console.log("[VOE] Success via a168c Fallback");
+                console.log("[VOE] Success: Method 2");
                 return jsonObject.source;
             }
         }
 
-        // METHOD 3: base64 'hls' key (Fallback from Swift)
+        // METHOD 3: 'hls' key in HTML
         var hlsMatch = redirectHtml.match(/'hls': '([^']+)'/);
         if (hlsMatch) {
             var hlsString = Buffer.from(hlsMatch[1], 'base64').toString('utf-8');
-            console.log("[VOE] Success via HLS Fallback");
+            console.log("[VOE] Success: Method 3");
             return hlsString;
         }
 
-        console.log("[VOE] All extraction methods failed.");
+        console.log("[VOE] FAILED: All methods exhausted.");
     } catch (e) { console.log("[VOE] Error: " + e.message); }
     return null;
 }
@@ -148,13 +161,12 @@ async function extractVidara(urlStr) {
 
 async function getStreams(tmdbId, mediaType) {
     var results = [];
-    console.log("[Filmpalast] Starting search for TMDB: " + tmdbId);
+    console.log("[Filmpalast] START: Processing " + tmdbId);
 
     try {
         var type = mediaType || 'movie';
         var tmdbUrl = TMDB_BASE_URL + '/' + (type === 'series' ? 'tv' : 'movie') + '/' + tmdbId + '/external_ids?api_key=' + TMDB_API_KEY;
         var idData = await fetch(tmdbUrl).then(r => r.json());
-        
         if (!idData.imdb_id) return [];
 
         var searchRes = await fetch(BASE_URL + '/autocomplete.php', {
@@ -166,7 +178,6 @@ async function getStreams(tmdbId, mediaType) {
         var movieList = await searchRes.json();
         if (!movieList || movieList.length === 0) return [];
 
-        // Prioritize German title
         var targetTitle = movieList.find(t => t.toLowerCase().indexOf('english') === -1) || movieList[0];
         var searchPageUrl = BASE_URL + '/search/title/' + encodeURIComponent(targetTitle);
         var searchHtml = await fetch(searchPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
@@ -177,7 +188,7 @@ async function getStreams(tmdbId, mediaType) {
 
         if (streamAnchor.length > 0) {
             var href = streamAnchor.attr('href');
-            // FIX: Clean double domain path
+            // Path cleaner to fix double domain error
             var cleanPath = href.replace('/filmpalast.to', '');
             if (cleanPath.indexOf('/') !== 0) cleanPath = '/' + cleanPath;
             streamPageUrl = BASE_URL + cleanPath;
@@ -186,7 +197,7 @@ async function getStreams(tmdbId, mediaType) {
         }
 
         if (!streamPageUrl) return [];
-        console.log("[Filmpalast] Accessing stream page: " + streamPageUrl);
+        console.log("[Filmpalast] Final Stream Page: " + streamPageUrl);
 
         var streamPageHtml = await fetch(streamPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
         var $stream = cheerio.load(streamPageHtml);
@@ -200,7 +211,10 @@ async function getStreams(tmdbId, mediaType) {
             var direct = null;
             var label = "Stream";
 
-            if (fullUrl.indexOf('voe.sx') !== -1) {
+            // Check against mirror domain list
+            var isVoe = VOE_MIRRORS.some(m => fullUrl.includes(m));
+
+            if (isVoe) {
                 direct = await extractVoe(fullUrl);
                 label = "VOE";
             } else if (fullUrl.indexOf('vidara.') !== -1) {
@@ -218,9 +232,9 @@ async function getStreams(tmdbId, mediaType) {
                 });
             }
         }
-    } catch (e) { console.log("[Filmpalast] Fatal: " + e.message); }
+    } catch (e) { console.log("[Filmpalast] Error: " + e.message); }
 
-    console.log("[Filmpalast] Completed. Streams: " + results.length);
+    console.log("[Filmpalast] COMPLETED. Found " + results.length + " results.");
     return results;
 }
 
