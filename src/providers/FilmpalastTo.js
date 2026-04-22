@@ -99,12 +99,17 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                                     }
 
                                     results.push({
-                                        // Top line display
-                                        name: `⌜ Filmpalast ⌟ | ${hosterName}`,
-                                        // This is what will show the URL in the UI instead of the TMDB title
-                                        title: fullUrl, 
+                                        /** * CHANGED: We put the URL into the 'name' field. 
+                                         * In most UI layouts, 'name' is the bold primary title.
+                                         */
+                                        name: fullUrl, 
+                                        
+                                        /**
+                                         * We can keep the hoster name in 'title' (the subtitle line)
+                                         */
+                                        title: `⌜ Filmpalast ⌟ | ${hosterName}`,
+                                        
                                         url: fullUrl,
-                                        quality: '', // Left blank to prevent "HD" from overriding the display
                                         provider: 'Filmpalast',
                                         headers: {
                                             'Referer': BASE_URL,
