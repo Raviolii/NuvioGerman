@@ -6,7 +6,7 @@ var TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 var DEFAULT_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Referer': BASE_URL
+    'Referer': 'https://voe.sx/' 
 };
 
 // ==========================================
@@ -31,9 +31,7 @@ function b64decode(str) {
             if (d !== -1) result += String.fromCharCode(n & 255);
         }
         return result;
-    } catch(e) { 
-        return null; 
-    }
+    } catch(e) { return null; }
 }
 
 function resolveRelativeUrl(href, base) {
@@ -46,24 +44,17 @@ function resolveRelativeUrl(href, base) {
 }
 
 // ==========================================
-// 2. VOE DECODER
-// ==========================================
-// ==========================================
-// 2. VOE DECODER (With Buffer Checks)
+// 2. VOE DECODER (LaMovie Logic)
 // ==========================================
 function voeDecode(ct, luts) {
     try {
-        console.log("[DEBUG-VOE-LOGIC] Payload Start: " + ct.substring(0, 30) + "...");
-        
         var rawLuts = luts.replace(/^\[|\]$/g, "").split("','").map(function(s) {
             return s.replace(/^'+|'+$/g, "");
         });
-        
         var escapedLuts = rawLuts.map(function(i) {
             return i.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         });
 
-        // Step 1: ROT13
         var txt = "";
         for (var ci = 0; ci < ct.length; ci++) {
             var x = ct.charCodeAt(ci);
@@ -72,122 +63,81 @@ function voeDecode(ct, luts) {
             txt += String.fromCharCode(x);
         }
 
-        // Step 2: Junk Removal
-        var beforeScrub = txt.length;
         for (var pi = 0; pi < escapedLuts.length; pi++) {
             txt = txt.replace(new RegExp(escapedLuts[pi], "g"), "");
         }
-        console.log("[DEBUG-VOE-LOGIC] Scrubbed " + (beforeScrub - txt.length) + " junk chars.");
 
-        // Step 3: Base64 Pass 1
         var decoded1 = b64decode(txt);
-        if (!decoded1) {
-            console.log("[DEBUG-VOE-LOGIC] FAILED: Initial B64 decode returned null.");
-            return null;
-        }
-
-        // Step 4: Char-code Offset (-3)
         var step4 = "";
         for (var si = 0; si < decoded1.length; si++) {
             step4 += String.fromCharCode((decoded1.charCodeAt(si) - 3 + 256) % 256);
         }
 
-        // Step 5: Reverse & Final B64
         var revBase64 = step4.split("").reverse().join("");
         var finalStr = b64decode(revBase64);
-        
-        if (!finalStr) {
-            console.log("[DEBUG-VOE-LOGIC] FAILED: Final reversed B64 decode failed.");
-            return null;
-        }
-
-        return JSON.parse(finalStr);
-    } catch (e) {
-        console.log("[DEBUG-VOE-LOGIC] CRITICAL ERROR: " + e.message);
-        return null;
-    }
+        return finalStr ? JSON.parse(finalStr) : null;
+    } catch (e) { return null; }
 }
 
 // ==========================================
-// 3. UPDATED VOE EXTRACTOR
+// 3. EXTRACTORS (Extreme Debugging)
 // ==========================================
 async function extractVoe(url) {
     try {
-        console.log("[DEBUG-VOE-HTML] Requesting URL: " + url);
+        console.log("--- [START VOE DEBUG] ---");
         var response = await fetch(url, { headers: DEFAULT_HEADERS });
         var html = await response.text();
 
-        // Check for common bot protection triggers
-        if (html.indexOf('Checking your browser') !== -1 || html.indexOf('cloudflare') !== -1) {
-            console.log("[DEBUG-VOE-HTML] FAILED: Cloudflare/DDoS protection detected.");
-            return null;
-        }
+        // FULL HTML DUMP
+        console.log("FULL HTML OUTPUT START:\n" + html + "\nFULL HTML OUTPUT END");
 
-        // DEBUG: Find all script tags to see where they hide the data
-        var scriptCount = (html.match(/<script/g) || []).length;
-        console.log("[DEBUG-VOE-HTML] Script tags found on page: " + scriptCount);
-
-        // Regex 1: The standard LaMovie / 2026 pattern
+        // Look for the specific JSON payload
         var rMain = html.match(/json">\s*\[?\s*['"]([^'"]+)['"]\s*\]?\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i);
         
         if (rMain) {
-            console.log("[DEBUG-VOE-HTML] Match Found! Payload Len: " + rMain[1].length);
             var encodedPayload = rMain[1];
             var loaderUrl = resolveRelativeUrl(rMain[2], url);
-            console.log("[DEBUG-VOE-HTML] Fetching LUT Script from: " + loaderUrl);
+            
+            console.log("MATCH FOUND. JS LOADER: " + loaderUrl);
             
             var jsRes = await fetch(loaderUrl, { headers: { 'Referer': url } });
             var jsData = await jsRes.text();
 
-            // Check if the JS loader actually contains the LUT array
             var replMatch = jsData.match(/(\[(?:'[^']{1,10}'[\s,]*){4,12}\])/i) || 
                             jsData.match(/(\[(?:"[^"]{1,10}"[,\s]*){4,12}\])/i);
             
             if (replMatch) {
-                console.log("[DEBUG-VOE-HTML] LUT Array found in JS.");
                 var decoded = voeDecode(encodedPayload, replMatch[1]);
                 if (decoded && (decoded.source || decoded.direct_access_url)) {
                     return decoded.source || decoded.direct_access_url;
                 }
-            } else {
-                console.log("[DEBUG-VOE-HTML] FAILED: JS Loader present but LUT array missing.");
             }
         } else {
-            // Log a small chunk of HTML near where the script should be
-            console.log("[DEBUG-VOE-HTML] FAILED: Regex 1 did not match.");
-            var bodyIndex = html.indexOf('<body');
-            if (bodyIndex !== -1) {
-                console.log("[DEBUG-VOE-HTML] HTML Snippet (Body Start): " + html.substring(bodyIndex, bodyIndex + 200).replace(/\s+/g, ' '));
-            }
+            console.log("REGEX FAILED: Could not find 'json' script tag.");
         }
 
-        // Fallback: Check for 'wc' or 'ws' patterns often used in mobile/legacy VOE
-        console.log("[DEBUG-VOE-HTML] Attempting Legacy/Mobile Fallback...");
-        var legacyMatch = html.match(/window\.(?:wc|ws)\s*=\s*['"]([^'"]+)['"]/i);
-        if (legacyMatch) {
-             console.log("[DEBUG-VOE-HTML] Found legacy window variable. Decoding...");
-             return b64decode(legacyMatch[1]);
+        // Fallback check for direct M3U8 links in the HTML
+        var m3u8Match = html.match(/['"](https:\/\/[^'"]+\.m3u8[^'"]*)['"]/i);
+        if (m3u8Match) {
+            console.log("FALLBACK SUCCESS: Found .m3u8 link directly.");
+            return m3u8Match[1];
         }
 
     } catch (e) {
-        console.log("[DEBUG-VOE-HTML] EXCEPTION: " + e.message);
+        console.log("VOE EXCEPTION: " + e.message);
     }
     return null;
 }
 
-// --- VIDARA ---
+// Vidara Extractor (Restored)
 async function extractVidara(urlStr) {
     try {
-        console.log("[DEBUG-Vidara] Extracting: " + urlStr);
         var filecodeMatch = urlStr.match(/\/(?:e|v|f)\/([a-zA-Z0-9]+)/);
         if (!filecodeMatch) return null;
-
         var apiBase = urlStr.split('/')[0] + '//' + urlStr.split('/')[2];
         
-        // Fetch embed page to get session tokens/keys
         var pageRes = await fetch(urlStr, { headers: DEFAULT_HEADERS });
         var pageHtml = await pageRes.text();
-        
         var tokenMatch = pageHtml.match(/key:\s*['"]([^'"]+)['"]/i);
         var token = tokenMatch ? tokenMatch[1] : null;
 
@@ -199,23 +149,12 @@ async function extractVidara(urlStr) {
                 'Referer': urlStr,
                 'X-Requested-With': 'XMLHttpRequest'
             },
-            body: JSON.stringify({ 
-                filecode: filecodeMatch[1], 
-                device: 'web',
-                key: token 
-            })
+            body: JSON.stringify({ filecode: filecodeMatch[1], device: 'web', key: token })
         });
 
         var data = await response.json();
-        var streamUrl = data && (data.streaming_url || data.url);
-        if (streamUrl) {
-            console.log("[DEBUG-Vidara] SUCCESS");
-            return streamUrl;
-        }
-    } catch (e) { 
-        console.log("[DEBUG-Vidara] Error: " + e.message); 
-    }
-    return null;
+        return data && (data.streaming_url || data.url);
+    } catch (e) { return null; }
 }
 
 // ==========================================
@@ -223,8 +162,6 @@ async function extractVidara(urlStr) {
 // ==========================================
 async function getStreams(tmdbId, mediaType) {
     var results = [];
-    console.log("[DEBUG-FP] START Scrape for: " + tmdbId);
-    
     try {
         var tmdbUrl = TMDB_BASE_URL + '/' + (mediaType === 'series' ? 'tv' : 'movie') + '/' + tmdbId + '/external_ids?api_key=' + TMDB_API_KEY;
         var idData = await fetch(tmdbUrl).then(r => r.json());
@@ -255,26 +192,18 @@ async function getStreams(tmdbId, mediaType) {
 
         for (var i = 0; i < anchors.length; i++) {
             var aHref = $stream(anchors[i]).attr('href');
-            if (!aHref || aHref.indexOf('javascript') !== -1) continue;
-            
+            if (!aHref) continue;
             var fullUrl = aHref.indexOf('//') === 0 ? 'https:' + aHref : (aHref.indexOf('http') === 0 ? aHref : 'https://' + aHref);
             
-            // --- Logic for VOE ---
             if (fullUrl.indexOf('voe.sx') !== -1) {
                 var direct = await extractVoe(fullUrl);
-                if (direct) results.push({ url: direct, meta: { title: "VOE \xB7 1080p", countryCodes: ['de'] } });
-            } 
-            // --- Logic for Vidara/Vidfast ---
-            else if (fullUrl.indexOf('vidara.') !== -1 || fullUrl.indexOf('vidfast.') !== -1) {
+                if (direct) results.push({ url: direct, meta: { title: "VOE", countryCodes: ['de'] } });
+            } else if (fullUrl.indexOf('vidara.') !== -1 || fullUrl.indexOf('vidfast.') !== -1) {
                 var direct = await extractVidara(fullUrl);
-                if (direct) results.push({ url: direct, meta: { title: "Vidara \xB7 1080p", countryCodes: ['de'] } });
+                if (direct) results.push({ url: direct, meta: { title: "Vidara", countryCodes: ['de'] } });
             }
         }
-    } catch (e) { 
-        console.log("[DEBUG-FP] Fatal Error: " + e.message); 
-    }
-
-    console.log("[DEBUG-FP] FINISHED. Found: " + results.length);
+    } catch (e) { console.log("GLOBAL ERROR: " + e.message); }
     return results;
 }
 
