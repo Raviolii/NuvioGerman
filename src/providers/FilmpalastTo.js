@@ -4,8 +4,13 @@ var BASE_URL = 'https://filmpalast.to';
 var TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
 var TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
+// Using a modern User-Agent to avoid 'Access Denied'
+var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
+
 var DEFAULT_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'User-Agent': UA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
     'Referer': BASE_URL
 };
 
@@ -40,63 +45,58 @@ var voeDecoder = {
             var s4 = this.shiftBack(s3, 3);
             var reversed = s4.split('').reverse().join('');
             var s5 = Buffer.from(reversed, 'base64').toString('utf-8');
-            console.log("[VOE DEBUG] Final Decoded String: " + s5.substring(0, 100) + "...");
             return JSON.parse(s5);
-        } catch (e) { 
-            console.log("[VOE DEBUG] Decoder failed at step: " + e.message);
-            return null; 
-        }
+        } catch (e) { return null; }
     }
 };
 
 // ==========================================
 // 2. EXTRACTORS
 // ==========================================
+
 async function extractVoe(url) {
     try {
-        console.log("[VOE] STEP 1: Fetching Embed Page -> " + url);
+        console.log("[VOE] Fetching landing page: " + url);
         var response = await fetch(url, { headers: DEFAULT_HEADERS });
         var html = await response.text();
         
-        // Find the "engine" or redirect link
-        var matches = html.match(/https?:\/\/[^'"<>]+/g);
-        if (!matches) {
-            console.log("[VOE] FAILED: No URL matches found in initial HTML.");
+        // Find redirect link or use original
+        var locMatch = html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/);
+        var targetUrl = locMatch ? locMatch[1] : url;
+
+        console.log("[VOE] Accessing player page...");
+        var playerRes = await fetch(targetUrl, { 
+            headers: Object.assign({}, DEFAULT_HEADERS, { 'Referer': url }) 
+        });
+        var playerHtml = await playerRes.text();
+
+        // Check for "Access Denied" in the HTML preview
+        if (playerHtml.includes("File access denied")) {
+            console.log("[VOE] ERROR: File access denied (IP Block or Session expired)");
             return null;
         }
 
-        var redirectUrl = matches[0];
-        console.log("[VOE] STEP 2: Fetching Redirect/Player URL -> " + redirectUrl);
-        
-        var redirectRes = await fetch(redirectUrl, { 
-            headers: { 'User-Agent': DEFAULT_HEADERS['User-Agent'], 'Referer': redirectUrl } 
-        });
-        var resHtml = await redirectRes.text();
-        var $ = cheerio.load(resHtml);
-        
-        // VOE usually stores data in a script tag as a base64-ish encoded JSON
-        var scriptTag = $('script[type="application/json"]').first();
-        var scriptContent = scriptTag.html();
+        var $ = cheerio.load(playerHtml);
+        var scriptContent = $('script[type="application/json"]').first().html();
 
         if (scriptContent && scriptContent.trim().length > 10) {
-            console.log("[VOE] STEP 3: Found script tag. Content Length: " + scriptContent.length);
-            var trimmed = scriptContent.trim();
-            // Remove the outer quotes if present
-            var cleanPayload = trimmed.substring(2, trimmed.length - 2);
-            
-            var decoded = voeDecoder.decode(cleanPayload);
+            var payload = scriptContent.trim().replace(/^'|'$/g, '');
+            var decoded = voeDecoder.decode(payload);
             if (decoded && decoded.source) {
-                console.log("[VOE] SUCCESS: Source found -> " + decoded.source);
+                console.log("[VOE] SUCCESS: Stream found");
                 return decoded.source;
-            } else {
-                console.log("[VOE] FAILED: Decoded object does not contain 'source'. Keys found: " + Object.keys(decoded || {}));
             }
-        } else {
-            console.log("[VOE] FAILED: Script tag empty or not found. HTML Preview: " + resHtml.substring(0, 300).replace(/\s+/g, ' '));
         }
-    } catch (e) { 
-        console.log("[VOE] EXCEPTION: " + e.message); 
-    }
+        
+        // Alternative method for some VOE versions
+        var altMatch = playerHtml.match(/sources\s*=\s*JSON\.parse\(atob\(['"]([^'"]+)['"]\)\)/);
+        if (altMatch) {
+            var decodedAlt = JSON.parse(Buffer.from(altMatch[1], 'base64').toString());
+            if (decodedAlt && decodedAlt.hls) return decodedAlt.hls;
+        }
+
+        console.log("[VOE] FAILED: No source found in player HTML");
+    } catch (e) { console.log("[VOE] EXCEPTION: " + e.message); }
     return null;
 }
 
@@ -105,11 +105,12 @@ async function extractVidara(urlStr) {
         console.log("[Vidara] Fetching: " + urlStr);
         var filecodeMatch = urlStr.match(/\/(?:e|v|f)\/([a-zA-Z0-9]+)/);
         if (!filecodeMatch) return null;
+
         var apiBase = urlStr.split('/')[0] + '//' + urlStr.split('/')[2];
         var response = await fetch(apiBase + '/api/stream', {
             method: 'POST',
             headers: {
-                'User-Agent': DEFAULT_HEADERS['User-Agent'],
+                'User-Agent': UA,
                 'Content-Type': 'application/json',
                 'Referer': urlStr,
                 'X-Requested-With': 'XMLHttpRequest'
@@ -117,33 +118,49 @@ async function extractVidara(urlStr) {
             body: JSON.stringify({ filecode: filecodeMatch[1], device: 'web' })
         });
         var data = await response.json();
-        return data && data.streaming_url ? data.streaming_url : null;
-    } catch (e) { console.log("[Vidara] Error: " + e.message); }
+        if (data && data.streaming_url) {
+            console.log("[Vidara] SUCCESS: Stream found");
+            return data.streaming_url;
+        }
+    } catch (e) { console.log("[Vidara] EXCEPTION: " + e.message); }
     return null;
 }
 
 // ==========================================
 // 3. MAIN SCRAPER
 // ==========================================
+
 async function getStreams(tmdbId, mediaType) {
     var results = [];
-    console.log("[Filmpalast] START: Searching for ID " + tmdbId);
-    
-    try {
-        var tmdbUrl = TMDB_BASE_URL + '/' + (mediaType === 'series' ? 'tv' : 'movie') + '/' + tmdbId + '/external_ids?api_key=' + TMDB_API_KEY;
-        var idData = await fetch(tmdbUrl).then(function(r) { return r.json(); });
-        if (!idData.imdb_id) return [];
+    console.log("[Filmpalast] START: Processing " + tmdbId);
 
+    try {
+        var type = mediaType || 'movie';
+        var tmdbUrl = TMDB_BASE_URL + '/' + (type === 'series' ? 'tv' : 'movie') + '/' + tmdbId + '/external_ids?api_key=' + TMDB_API_KEY;
+        var idData = await fetch(tmdbUrl).then(function(r) { return r.json(); });
+        
+        if (!idData.imdb_id) {
+            console.log("[Filmpalast] No IMDB ID found for TMDB: " + tmdbId);
+            return [];
+        }
+
+        // Autocomplete
         var searchRes = await fetch(BASE_URL + '/autocomplete.php', {
             method: 'POST',
-            headers: { 'User-Agent': DEFAULT_HEADERS['User-Agent'], 'Content-Type': 'application/x-www-form-urlencoded' },
+            headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'term=' + encodeURIComponent(idData.imdb_id)
         });
         
         var movieList = await searchRes.json();
-        if (!movieList || movieList.length === 0) return [];
-        
+        if (!movieList || movieList.length === 0) {
+            console.log("[Filmpalast] No movies found in autocomplete.");
+            return [];
+        }
+
+        // Filter for non-English results
         var targetTitle = movieList.find(function(t) { return t.toLowerCase().indexOf('english') === -1; }) || movieList[0];
+        console.log("[Filmpalast] Target Title: " + targetTitle);
+
         var searchPageUrl = BASE_URL + '/search/title/' + encodeURIComponent(targetTitle);
         var searchHtml = await fetch(searchPageUrl, { headers: DEFAULT_HEADERS }).then(function(r) { return r.text(); });
         var $search = cheerio.load(searchHtml);
@@ -153,41 +170,55 @@ async function getStreams(tmdbId, mediaType) {
 
         if (streamAnchor.length > 0) {
             var href = streamAnchor.attr('href');
+            // FIX: Clean the path to avoid double domain errors
             var cleanPath = href.replace('/filmpalast.to', '');
             if (cleanPath.indexOf('/') !== 0) cleanPath = '/' + cleanPath;
             streamPageUrl = BASE_URL + cleanPath;
-        } else if (searchHtml.indexOf('currentStreamLinks') !== -1) {
+        } else if (searchHtml.includes('currentStreamLinks')) {
             streamPageUrl = searchPageUrl;
         }
 
-        if (!streamPageUrl) return [];
-        console.log("[Filmpalast] FOUND Stream Page: " + streamPageUrl);
+        if (!streamPageUrl) {
+            console.log("[Filmpalast] ERROR: Could not find stream page.");
+            return [];
+        }
+        console.log("[Filmpalast] Accessing stream page: " + streamPageUrl);
 
         var streamPageHtml = await fetch(streamPageUrl, { headers: DEFAULT_HEADERS }).then(function(r) { return r.text(); });
         var $stream = cheerio.load(streamPageHtml);
         var anchors = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a').toArray();
+
+        console.log("[Filmpalast] Found " + anchors.length + " hoster links.");
 
         for (var i = 0; i < anchors.length; i++) {
             var aHref = $stream(anchors[i]).attr('href');
             if (!aHref || aHref.indexOf('javascript') !== -1) continue;
             
             var fullUrl = aHref.indexOf('//') === 0 ? 'https:' + aHref : (aHref.indexOf('http') === 0 ? aHref : 'https://' + aHref);
-            
+            var direct = null;
+            var label = $stream(anchors[i]).text().trim() || "Stream";
+
             if (fullUrl.indexOf('voe.sx') !== -1) {
-                var direct = await extractVoe(fullUrl);
-                if (direct) {
-                    results.push({ url: direct, meta: { title: "[VOE] Filmpalast", countryCodes: ['de'] } });
-                }
+                direct = await extractVoe(fullUrl);
+                label = "VOE";
             } else if (fullUrl.indexOf('vidara.') !== -1) {
-                var direct = await extractVidara(fullUrl);
-                if (direct) {
-                    results.push({ url: direct, meta: { title: "[Vidara] Filmpalast", countryCodes: ['de'] } });
-                }
+                direct = await extractVidara(fullUrl);
+                label = "Vidara";
+            }
+
+            if (direct) {
+                results.push({
+                    url: direct,
+                    meta: { 
+                        title: "[" + label + "] Filmpalast", 
+                        countryCodes: ['de'] 
+                    }
+                });
             }
         }
-    } catch (e) { console.log("[Filmpalast] ERROR: " + e.message); }
+    } catch (e) { console.log("[Filmpalast] FATAL: " + e.message); }
 
-    console.log("[Filmpalast] FINISHED. Found " + results.length + " streams.");
+    console.log("[Filmpalast] DONE. Streams found: " + results.length);
     return results;
 }
 
