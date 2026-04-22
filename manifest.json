@@ -7,62 +7,20 @@
       "name": "MoviesDrive",
       "description": "MoviesDrive streaming with multiple quality options and versions",
       "version": "1.1.1",
-      "author": "Phisher",
+      "author": "R4VEolii",
       "supportedTypes": [
         "movie",
         "tv"
       ],
-      "filename": "src/providers/moviesdrive.js",
+      "filename": "src/providers/FilmpalastTo.js",
       "enabled": true,
       "formats": [
         "mp4",
         "mkv"
       ],
-      "logo": "https://i.imgur.com/9bGkGMi.png",
+      "logo": "https://filmpalast.to/themes/downloadarchive/images/logo.png",
       "contentLanguage": [
-        "en"
-      ]
-    },
-    {
-      "id": "HiAnime",
-      "name": "HiAnime",
-      "description": "HiAnime Anime Streaming",
-      "version": "1.5.0",
-      "author": "Phisher",
-      "supportedTypes": [
-        "movie",
-        "tv"
-      ],
-      "filename": "src/providers/hianime.js",
-      "enabled": true,
-      "formats": [
-        "mp4",
-        "mkv"
-      ],
-      "logo": "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/Icons/hianime.png",
-      "contentLanguage": [
-        "en"
-      ]
-    },
-    {
-      "id": "XDMovies",
-      "name": "XDMovies",
-      "description": "XDMovies Multi-Lang Movies/TVSeries Streaming",
-      "version": "1.1.2",
-      "author": "Phisher",
-      "supportedTypes": [
-        "movie",
-        "tv"
-      ],
-      "filename": "src/providers/xdmovies.js",
-      "enabled": false,
-      "formats": [
-        "mp4",
-        "mkv"
-      ],
-      "logo": "https://xdmovies.site/assets/logo1.png",
-      "contentLanguage": [
-        "hi"
+        "de"
       ]
     }
   ]
