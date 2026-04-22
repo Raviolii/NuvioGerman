@@ -1,481 +1,134 @@
 var cheerio = require('cheerio-without-node-native');
 
-
-
 var BASE_URL = 'https://filmpalast.to';
-
 var TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
-
 var TMDB_BASE_URL = 'https://api.themoviedb.org/3';
-
-
-
-// High-compatibility User-Agent
-
 var UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36';
 
-
-
 var DEFAULT_HEADERS = {
-
     'User-Agent': UA,
-
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-
-    'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-
     'Referer': BASE_URL
-
 };
 
+var VOE_MIRRORS = ['voe.sx', 'chuckle-tube.com', 'goofy-banana.com', 'smoki.cc', 'kinoger.ru', 'v-o-e-unblock.com'];
 
-
-// Mirror domains from the VOE SDK
-
-var VOE_MIRRORS = [
-
-    'voe.sx', 'chuckle-tube.com', 'goofy-banana.com', 'smoki.cc', 'kinoger.ru', 
-
-    'v-o-e-unblock.com', 'reputationsheriffkennethsand.com', '19turanosephantasia.com'
-
-];
-
-
+// Helper for Base64 (Works in Node and Browser/RN)
+const b64Decode = (str) => {
+    try {
+        return typeof Buffer !== 'undefined' 
+            ? Buffer.from(str, 'base64').toString('utf-8') 
+            : atob(str);
+    } catch (e) { return ""; }
+};
 
 // ==========================================
-
-// 1. VOE DECODER
-
+// OPTIMIZED VOE DECODER
 // ==========================================
-
 var voeDecoder = {
-
-    shiftLetters: function(input) {
-
-        return input.replace(/[a-zA-Z]/g, function(c) {
-
-            var base = c <= 'Z' ? 65 : 97;
-
-            return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
-
-        });
-
-    },
-
-    replaceJunk: function(input) {
-
-        var junkParts = ["@$", "^^", "~@", "%?", "*~", "!!", "#&"];
-
-        var result = input;
-
-        for (var i = 0; i < junkParts.length; i++) {
-
-            result = result.split(junkParts[i]).join("_");
-
-        }
-
-        return result.replace(/_/g, "");
-
-    },
-
-    shiftBack: function(s, n) {
-
-        var res = "";
-
-        for (var i = 0; i < s.length; i++) { res += String.fromCharCode(s.charCodeAt(i) - n); }
-
-        return res;
-
-    },
-
     decode: function(encoded) {
-
         try {
+            // Combined Shift & Junk removal in one pass
+            var s1 = encoded.replace(/[a-zA-Z]/g, function(c) {
+                var base = c <= 'Z' ? 65 : 97;
+                return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+            }).replace(/(@\$|\^\^|~@|%\?|\*~|!!|#&)/g, "");
 
-            var s1 = this.shiftLetters(encoded);
-
-            var s2 = this.replaceJunk(s1);
-
-            var s3 = Buffer.from(s2, 'base64').toString('utf-8');
-
-            var s4 = this.shiftBack(s3, 3);
-
-            var reversed = s4.split('').reverse().join('');
-
-            var s5 = Buffer.from(reversed, 'base64').toString('utf-8');
-
+            var s3 = b64Decode(s1);
+            // Shift back 3
+            var s4 = "";
+            for (var i = 0; i < s3.length; i++) { s4 += String.fromCharCode(s3.charCodeAt(i) - 3); }
+            
+            var s5 = b64Decode(s4.split('').reverse().join(''));
             return JSON.parse(s5);
-
         } catch (e) { return null; }
-
     }
-
 };
 
-
-
 // ==========================================
-
-// 2. EXTRACTORS
-
+// OPTIMIZED EXTRACTORS
 // ==========================================
-
-
 
 async function extractVoe(urlStr) {
-
     try {
-
-        console.log("[VOE] Initiating extraction for: " + urlStr);
-
-        var urlObj = new URL(urlStr);
-
-        
-
-        // Step 1: Landing Page Fetch
-
         var response = await fetch(urlStr, { headers: DEFAULT_HEADERS });
-
         var html = await response.text();
 
-        
+        // Fast Regex check instead of full Cheerio load for Method 2 & 3
+        var hlsMatch = html.match(/'hls':\s*'([^']+)'/);
+        if (hlsMatch) return b64Decode(hlsMatch[1]);
 
-        // Check for JS Redirects (window.location.href)
+        var a168Match = html.match(/var a168c='([^']+)'/);
+        if (a168Match) return JSON.parse(b64Decode(a168Match[1]).split('').reverse().join('')).source;
 
-        var redirectMatch = html.match(/window\.location\.href\s*=\s*'([^']+)/);
-
-        var redirectUrl = redirectMatch ? redirectMatch[1] : null;
-
-
-
-        if (!redirectUrl) {
-
-            var pattern = /https?:\/\/[^'"<>]+/g;
-
-            var matches = html.match(pattern);
-
-            if (matches) redirectUrl = matches[0];
-
-        }
-
-
-
-        if (!redirectUrl) redirectUrl = urlStr;
-
-
-
-        // Construct headers with Swift-style Referer
-
-        var parts = redirectUrl.split("/");
-
-        var customHeaders = Object.assign({}, DEFAULT_HEADERS);
-
-        if (parts.length > 2) {
-
-            customHeaders["Referer"] = parts[0] + "//" + parts[2] + "/";
-
-        }
-
-
-
-        console.log("[VOE] Fetching Player with Referer: " + customHeaders["Referer"]);
-
-        var redirectRes = await fetch(redirectUrl, { headers: customHeaders });
-
-        var redirectHtml = await redirectRes.text();
-
-
-
-        // METHOD 1: application/json script tag
-
-        var $ = cheerio.load(redirectHtml);
-
+        // Method 1 (Json)
+        var $ = cheerio.load(html);
         var script = $('script[type="application/json"]').first().html();
-
-        if (script && script.trim().length > 4) {
-
+        if (script) {
             var trimmed = script.trim();
-
             var decoded = voeDecoder.decode(trimmed.substring(2, trimmed.length - 2));
-
-            if (decoded && decoded.source) {
-
-                console.log("[VOE] Success: Method 1");
-
-                return decoded.source;
-
-            }
-
+            if (decoded?.source) return decoded.source;
         }
-
-
-
-        // METHOD 2: var a168c (Base64 + Reversed)
-
-        var a168Match = redirectHtml.match(/var a168c='([^']+)'/);
-
-        if (a168Match) {
-
-            var decodedStr = Buffer.from(a168Match[1], 'base64').toString('utf-8');
-
-            var reversed = decodedStr.split('').reverse().join('');
-
-            var jsonObject = JSON.parse(reversed);
-
-            if (jsonObject && jsonObject.source) {
-
-                console.log("[VOE] Success: Method 2");
-
-                return jsonObject.source;
-
-            }
-
-        }
-
-
-
-        // METHOD 3: 'hls' key in HTML
-
-        var hlsMatch = redirectHtml.match(/'hls': '([^']+)'/);
-
-        if (hlsMatch) {
-
-            var hlsString = Buffer.from(hlsMatch[1], 'base64').toString('utf-8');
-
-            console.log("[VOE] Success: Method 3");
-
-            return hlsString;
-
-        }
-
-
-
-        console.log("[VOE] FAILED: All methods exhausted.");
-
-    } catch (e) { console.log("[VOE] Error: " + e.message); }
-
-    return null;
-
+    } catch (e) { return null; }
 }
 
-
-
-async function extractVidara(urlStr) {
-
-    try {
-
-        console.log("[Vidara] Fetching: " + urlStr);
-
-        var filecodeMatch = urlStr.match(/\/(?:e|v|f)\/([a-zA-Z0-9]+)/);
-
-        if (!filecodeMatch) return null;
-
-
-
-        var apiBase = urlStr.split('/')[0] + '//' + urlStr.split('/')[2];
-
-        var response = await fetch(apiBase + '/api/stream', {
-
-            method: 'POST',
-
-            headers: {
-
-                'User-Agent': UA,
-
-                'Content-Type': 'application/json',
-
-                'Referer': urlStr,
-
-                'X-Requested-With': 'XMLHttpRequest'
-
-            },
-
-            body: JSON.stringify({ filecode: filecodeMatch[1], device: 'web' })
-
-        });
-
-        var data = await response.json();
-
-        if (data && data.streaming_url) {
-
-            console.log("[Vidara] Success");
-
-            return data.streaming_url;
-
-        }
-
-    } catch (e) { console.log("[Vidara] Error: " + e.message); }
-
-    return null;
-
-}
-
-
-
 // ==========================================
-
-// 3. MAIN SCRAPER
-
+// MAIN SCRAPER
 // ==========================================
-
-
 
 async function getStreams(tmdbId, mediaType) {
-
-    var results = [];
-
-    console.log("[Filmpalast] START: Processing " + tmdbId);
-
-
-
     try {
-
-        var type = mediaType || 'movie';
-
-        var tmdbUrl = TMDB_BASE_URL + '/' + (type === 'series' ? 'tv' : 'movie') + '/' + tmdbId + '/external_ids?api_key=' + TMDB_API_KEY;
-
+        // 1. Parallel Fetch: Get TMDB Data
+        var type = mediaType === 'series' ? 'tv' : 'movie';
+        var tmdbUrl = `${TMDB_BASE_URL}/${type}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`;
         var idData = await fetch(tmdbUrl).then(r => r.json());
-
         if (!idData.imdb_id) return [];
 
-
-
-        var searchRes = await fetch(BASE_URL + '/autocomplete.php', {
-
+        // 2. Search Filmpalast
+        var searchRes = await fetch(`${BASE_URL}/autocomplete.php`, {
             method: 'POST',
+            headers: { ...DEFAULT_HEADERS, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `term=${idData.imdb_id}`
+        }).then(r => r.json());
 
-            headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded' },
+        if (!searchRes?.length) return [];
 
-            body: 'term=' + encodeURIComponent(idData.imdb_id)
+        // 3. Navigate to Stream Page (optimized pathing)
+        var targetTitle = searchRes.find(t => !t.toLowerCase().includes('english')) || searchRes[0];
+        var searchPageUrl = `${BASE_URL}/search/title/${encodeURIComponent(targetTitle)}`;
+        var searchHtml = await fetch(searchPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
+        
+        var $search = cheerio.load(searchHtml);
+        var href = $search('a[href*="/stream/"]').first().attr('href');
+        if (!href) return [];
 
+        var streamPageUrl = BASE_URL + (href.startsWith('/') ? href : '/' + href).replace('/filmpalast.to', '');
+        var streamHtml = await fetch(streamPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
+        
+        // 4. Extract Hoster Links
+        var $stream = cheerio.load(streamHtml);
+        var links = $stream('.currentStreamLinks a, .hosterSite span a').toArray()
+            .map(el => $stream(el).attr('href'))
+            .filter(h => h && !h.includes('javascript'));
+
+        // 5. CONCURRENT EXTRACTION (The big speed boost)
+        var streamPromises = links.map(async (url) => {
+            var fullUrl = url.startsWith('//') ? 'https:' + url : (url.startsWith('http') ? url : 'https://' + url);
+            
+            if (VOE_MIRRORS.some(m => fullUrl.includes(m))) {
+                const src = await extractVoe(fullUrl);
+                return src ? { url: src, meta: { title: "[VOE] Filmpalast", countryCodes: ['de'] } } : null;
+            }
+            return null;
         });
 
-        
-
-        var movieList = await searchRes.json();
-
-        if (!movieList || movieList.length === 0) return [];
-
-
-
-        var targetTitle = movieList.find(t => t.toLowerCase().indexOf('english') === -1) || movieList[0];
-
-        var searchPageUrl = BASE_URL + '/search/title/' + encodeURIComponent(targetTitle);
-
-        var searchHtml = await fetch(searchPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
-
-        var $search = cheerio.load(searchHtml);
-
-        
-
-        var streamAnchor = $search('a[href*="/stream/"]').first();
-
-        var streamPageUrl = null;
-
-
-
-        if (streamAnchor.length > 0) {
-
-            var href = streamAnchor.attr('href');
-
-            // Path cleaner to fix double domain error
-
-            var cleanPath = href.replace('/filmpalast.to', '');
-
-            if (cleanPath.indexOf('/') !== 0) cleanPath = '/' + cleanPath;
-
-            streamPageUrl = BASE_URL + cleanPath;
-
-        } else if (searchHtml.includes('currentStreamLinks')) {
-
-            streamPageUrl = searchPageUrl;
-
-        }
-
-
-
-        if (!streamPageUrl) return [];
-
-        console.log("[Filmpalast] Final Stream Page: " + streamPageUrl);
-
-
-
-        var streamPageHtml = await fetch(streamPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
-
-        var $stream = cheerio.load(streamPageHtml);
-
-        var anchors = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a').toArray();
-
-
-
-        for (var i = 0; i < anchors.length; i++) {
-
-            var aHref = $stream(anchors[i]).attr('href');
-
-            if (!aHref || aHref.indexOf('javascript') !== -1) continue;
-
-            
-
-            var fullUrl = aHref.indexOf('//') === 0 ? 'https:' + aHref : (aHref.indexOf('http') === 0 ? aHref : 'https://' + aHref);
-
-            var direct = null;
-
-            var label = "Stream";
-
-
-
-            // Check against mirror domain list
-
-            var isVoe = VOE_MIRRORS.some(m => fullUrl.includes(m));
-
-
-
-            if (isVoe) {
-
-                direct = await extractVoe(fullUrl);
-
-                label = "VOE";
-
-            } else if (fullUrl.indexOf('vidara.') !== -1) {
-
-                direct = await extractVidara(fullUrl);
-
-                label = "Vidara";
-
-            }
-
-
-
-            if (direct) {
-
-                results.push({
-
-                    url: direct,
-
-                    meta: { 
-
-                        title: "[" + label + "] Filmpalast", 
-
-                        countryCodes: ['de'] 
-
-                    }
-
-                });
-
-            }
-
-        }
-
-    } catch (e) { console.log("[Filmpalast] Error: " + e.message); }
-
-
-
-    console.log("[Filmpalast] COMPLETED. Found " + results.length + " results.");
-
-    return results;
-
+        var results = await Promise.all(streamPromises);
+        return results.filter(r => r !== null);
+
+    } catch (e) {
+        console.error("[Filmpalast] Fatal Error:", e);
+        return [];
+    }
 }
 
-
-
-module.exports = { getStreams: getStreams };
+module.exports = { getStreams };
