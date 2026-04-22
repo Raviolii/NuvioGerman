@@ -93,22 +93,60 @@ function voeDecode(ct, luts) {
 // --- VOE EXTRACTOR ---
 async function extractVoe(embedUrl) {
     try {
-        console.log("[DEBUG-VOE] Requesting: " + embedUrl);
-        var res = await fetch(embedUrl, { headers: { "Referer": embedUrl } });
+        console.log("\n--- [VOE DEBUG START] ---");
+        console.log("[1] Requesting Original URL: " + embedUrl);
+        
+        var res = await fetch(embedUrl, { 
+            headers: { 
+                "Referer": "https://voe.sx/",
+                "User-Agent": DEFAULT_HEADERS['User-Agent']
+            } 
+        });
         var data = await res.text();
 
-        // Landing Page Redirect Logic
+        // 1. Check for the Javascript Redirect (The "Landing Page")
+        console.log("[2] Page Length: " + data.length + " chars.");
         var redirectMatch = data.match(/window\.location\.href\s*=\s*['"](https:\/\/[^'"]+)['"]/i);
+        
         if (redirectMatch && redirectMatch[1].indexOf('voe.sx') === -1) {
-            console.log("[DEBUG-VOE] REDIRECT DETECTED -> " + redirectMatch[1]);
-            var res2 = await fetch(redirectMatch[1], { headers: { "Referer": embedUrl } });
+            var jumpUrl = redirectMatch[1];
+            console.log("[3] REDIRECT DETECTED! Jumping to: " + jumpUrl);
+            
+            // Log the "Middleman" HTML to see if it's an ad or a bot check
+            var res2 = await fetch(jumpUrl, { headers: { "Referer": embedUrl } });
+            console.log("[4] Reached Middleman. Status: " + res2.status);
             data = await res2.text();
+            
+            // If the middleman is short, it's likely ANOTHER redirect script
+            if (data.length < 1500) {
+                console.log("[DEBUG-VOE] Middleman HTML is very short. Snippet: " + data.substring(0, 300).replace(/\s+/g, ' '));
+                
+                // Attempt to find a second jump URL
+                var secondJump = data.match(/window\.location\.href\s*=\s*['"](https:\/\/[^'"]+)['"]/i);
+                if (secondJump) {
+                    console.log("[5] SECOND JUMP DETECTED: " + secondJump[1]);
+                    var res3 = await fetch(secondJump[1], { headers: { "Referer": jumpUrl } });
+                    data = await res3.text();
+                }
+            }
         }
 
+        // 2. Log final HTML state before Regex
+        console.log("[6] Analyzing Final HTML content...");
+        if (data.indexOf('Checking your browser') !== -1 || data.indexOf('cloudflare') !== -1) {
+            console.log("!!! ALERT: VOE is blocking you with Cloudflare / Browser Check.");
+            return null;
+        }
+
+        // 3. Run Parsing Regex
         var rMain = data.match(/json">\s*\[?\s*['"]([^'"]+)['"]\s*\]?\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i);
+        
         if (rMain) {
+            console.log("[7] SUCCESS: Found JSON script tag and Payload.");
             var encodedArray = rMain[1];
             var loaderUrl = resolveRelativeUrl(rMain[2], embedUrl);
+            
+            console.log("[8] Fetching LUT Script: " + loaderUrl);
             var jsRes = await fetch(loaderUrl, { headers: { "Referer": embedUrl } });
             var jsData = await jsRes.text();
             
@@ -118,12 +156,33 @@ async function extractVoe(embedUrl) {
             if (replMatch) {
                 var decoded = voeDecode(encodedArray, replMatch[1]);
                 if (decoded && (decoded.source || decoded.direct_access_url)) {
+                    console.log("[9] DECODE COMPLETE: Stream Found.");
                     return decoded.source || decoded.direct_access_url;
                 }
+            } else {
+                console.log("!!! FAILED: Could not find LUT array in the JS loader.");
+            }
+        } else {
+            // Print a snippet of where the video should be
+            var bodyIdx = data.indexOf('<body');
+            console.log("[10] FAILED: Regex 1 did not match. Body Snippet: " + data.substring(bodyIdx, bodyIdx + 500).replace(/\s+/g, ' '));
+        }
+
+        // 4. Final Fallback (Looking for raw .m3u8 or .mp4)
+        console.log("[11] Attempting Fallback Regex for raw links...");
+        var re = /(?:mp4|hls|file)['"\s]*:\s*['"]([^'"]+)['"]/gi;
+        var m;
+        while ((m = re.exec(data)) !== null) {
+            var url = m[1];
+            if (url && url.length > 10) {
+                console.log("[12] Fallback found a link!");
+                return url.indexOf("aHR0") === 0 ? b64decode(url) : url;
             }
         }
+
+        console.log("--- [VOE DEBUG END - NO STREAM FOUND] ---\n");
     } catch (err) {
-        console.log("[DEBUG-VOE] Fatal Exception: " + err.message);
+        console.log("[VOE EXCEPTION] " + err.message);
     }
     return null;
 }
