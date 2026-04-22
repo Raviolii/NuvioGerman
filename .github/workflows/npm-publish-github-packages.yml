@@ -1,31 +1,25 @@
 name: Scraper Test
+on: [push, workflow_dispatch]
 
-on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:
-
-# Set the environment variable globally for the workflow
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  test-scraper:
+  test:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4 # V4 is compatible with Node 24
-
-      - name: Setup Node.js
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node 24
         uses: actions/setup-node@v4
         with:
-          node-version: '24' # Updated from 20 to 24
+          node-version: '24'
 
-      - name: Install dependencies
+      - name: Install Dependencies
+        # You need cheerio to run the test
         run: npm install cheerio-without-node-native
 
-      - name: Run Scraper Test
-        run: node test-scraper.js
+      - name: Run Test Script
+        # Make sure test.js is in the root folder of your repo
+        run: node test.js
