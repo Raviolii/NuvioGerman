@@ -1,5 +1,5 @@
 // Filmpalast Scraper for Nuvio Local Scrapers
-// Goal: Display the full stream URL as the result title
+// Final Version: Force URL display only
 
 const cheerio = require('cheerio-without-node-native');
 
@@ -81,6 +81,7 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                             const $stream = cheerio.load(streamHtml);
                             const results = [];
                             
+                            // Target common hoster link containers on Filmpalast
                             const linkElements = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a');
 
                             linkElements.each((_, element) => {
@@ -90,22 +91,23 @@ function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) 
                                     let fullUrl;
                                     if (href.startsWith('http')) fullUrl = href;
                                     else if (href.startsWith('//')) fullUrl = `https:${href}`;
+                                    else if (href.startsWith('/')) fullUrl = `https://${href.substring(1)}`;
                                     else fullUrl = `https://${href}`;
 
-                                    try {
-                                        results.push({
-                                            url: fullUrl,
-                                            meta: {
-                                                // This is the line that determines the displayed text
-                                                title: fullUrl, 
-                                                countryCodes: ['de']
-                                            }
-                                        });
-                                    } catch (e) {}
+                                    results.push({
+                                        // Overwriting EVERYTHING with the URL to ensure it shows
+                                        name: fullUrl, 
+                                        url: fullUrl,
+                                        meta: {
+                                            title: fullUrl,
+                                            countryCodes: ['de']
+                                        }
+                                    });
                                 }
                             });
 
-                            return results;
+                            // Deduplicate results based on URL
+                            return results.filter((v, i, a) => a.findIndex(t => t.url === v.url) === i);
                         });
                 });
         });
