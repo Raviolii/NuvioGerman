@@ -5,7 +5,7 @@ var TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
 var TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 // ==========================================
-// 1. VOE DECODER FUNCTIONS (Individual)
+// 1. VOE DECODER FUNCTIONS
 // ==========================================
 
 function voeShiftLetters(input) {
@@ -149,18 +149,27 @@ async function getStreams(tmdbId, mediaType) {
             if (!href || href.indexOf('javascript') !== -1) continue;
 
             var fullUrl = href.indexOf('//') === 0 ? 'https:' + href : (href.indexOf('http') === 0 ? href : 'https://' + href);
+            
             var direct = null;
+            var hosterLabel = "";
 
+            // Check Hoster Type and Extract
             if (fullUrl.indexOf('voe.sx') !== -1) {
+                hosterLabel = "VOE";
                 direct = await extractVoe(fullUrl);
             } else if (fullUrl.indexOf('vidara.') !== -1) {
+                hosterLabel = "Vidara";
                 direct = await extractVidara(fullUrl);
             }
 
             if (direct) {
                 results.push({
                     url: direct,
-                    meta: { title: direct, countryCodes: ['de'] }
+                    meta: { 
+                        // Updated: Includes Hoster Name + Direct URL in the title
+                        title: "[" + hosterLabel + "] " + direct, 
+                        countryCodes: ['de'] 
+                    }
                 });
             }
         }
