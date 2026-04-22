@@ -2,7 +2,7 @@
 const cheerio = require('cheerio-without-node-native');
 
 // Import the VOE extractor from the specified path
-const { extractVoe } = require('../extractors/voe');
+const { extractVoe } = require('src/extractors/voe');
 
 const BASE_URL = 'https://filmpalast.to';
 const TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
