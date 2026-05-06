@@ -4,7 +4,7 @@ async function startTest() {
     console.log("🚀 Testing Filmpalast locally...");
     
     // Test with 'Der Super Mario Galaxy Film' (1226863) or 'Interstellar' (157336)
-    const tmdbId = 1226863
+    const tmdbId = 1318447
     const type = "movie";
 
     try {
