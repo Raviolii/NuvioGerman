@@ -20,10 +20,28 @@
       "logo": "https://s.to/favicon.ico",
       "contentLanguage": [
         "de"
+      ]
+    },
+    {
+      "id": "Filmpalast",
+      "name": "Filmpalast",
+      "description": "Filmpalast.to - German movies and series",
+      "version": "1.0.0",
+      "author": "R4VEolii",
+      "supportedTypes": [
+        "movie",
+        "series"
       ],
-      "requires": {
-        "tmdb_api": true
-      }
+      "filename": "src/providers/FilmpalastTo.js",
+      "enabled": true,
+      "formats": [
+        "mp4",
+        "m3u8"
+      ],
+      "logo": "https://filmpalast.to/themes/downloadarchive/images/logo.png",
+      "contentLanguage": [
+        "de"
+      ]
     }
   ]
 }
