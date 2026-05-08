@@ -194,16 +194,22 @@ async function extractVidara(urlStr) {
     }
 }
 // ==========================================
-// MAIN FUNCTION
-// ==========================================
-async function getStreams(tmdbId, mediaType) {
+
+async function getStreams(tmdbId) {
     var results = [];
-    console.log("[DEBUG-FP] Starting search for TMDB ID:", tmdbId);
+    console.log("[DEBUG-FP] Starting movie search for TMDB ID:", tmdbId);
+    
     try {
-        // ... (TMDB + Filmpalast logic remains the same)
-        var tmdbUrl = TMDB_BASE_URL + '/' + (mediaType === 'series' ? 'tv' : 'movie') + '/' + tmdbId + '/external_ids?api_key=' + TMDB_API_KEY;
+        // 1. Get IMDB ID from TMDB (Strictly for movies now)
+        var tmdbUrl = TMDB_BASE_URL + '/movie/' + tmdbId + '/external_ids?api_key=' + TMDB_API_KEY;
         var idData = await fetch(tmdbUrl).then(r => r.json());
-        if (!idData.imdb_id) return [];
+        
+        if (!idData.imdb_id) {
+            console.log("[DEBUG-FP] No IMDB ID found for this movie.");
+            return [];
+        }
+
+        // 2. Search Filmpalast via Autocomplete using IMDB ID
         var searchRes = await fetch(BASE_URL + '/autocomplete.php', {
             method: 'POST',
             headers: {
@@ -212,31 +218,45 @@ async function getStreams(tmdbId, mediaType) {
             },
             body: 'term=' + encodeURIComponent(idData.imdb_id)
         });
+        
         var movieList = await searchRes.json();
         if (!movieList || movieList.length === 0) return [];
+
+        // 3. Select target title (Filtering out English versions if present)
         var targetTitle = movieList.find(t => !t.toLowerCase().includes('english')) || movieList[0];
         var searchPageUrl = BASE_URL + '/search/title/' + encodeURIComponent(targetTitle);
+        
         var searchHtml = await fetch(searchPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
         var $search = cheerio.load(searchHtml);
+        
+        // 4. Find the stream page link
         var streamAnchor = $search('a[href*="/stream/"]').first();
         var streamPageUrl = streamAnchor.length > 0
             ? BASE_URL + streamAnchor.attr('href').replace('/filmpalast.to', '')
             : null;
+
         if (!streamPageUrl) return [];
+
+        // 5. Extract hoster links from the stream page
         var streamPageHtml = await fetch(streamPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
         var $stream = cheerio.load(streamPageHtml);
         var anchors = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a').toArray();
+
         for (var anchor of anchors) {
             var aHref = $stream(anchor).attr('href');
             if (!aHref || aHref.includes('javascript')) continue;
+
             var fullUrl = aHref.startsWith('//') ? 'https:' + aHref
                         : (aHref.startsWith('http') ? aHref : 'https://' + aHref);
+
+            // VOE Extraction
             if (fullUrl.includes('voe.sx') || fullUrl.includes('voe-') || fullUrl.includes('unblock')) {
                 var direct = await extractVoe(fullUrl);
                 if (direct) {
                     results.push({ url: direct, meta: { title: "VOE · 1080p", countryCodes: ['de'] } });
                 }
             }
+            // Vidara Extraction
             else if (fullUrl.includes('vidara.') || fullUrl.includes('vidfast.')) {
                 var direct = await extractVidara(fullUrl);
                 if (direct) {
@@ -247,7 +267,8 @@ async function getStreams(tmdbId, mediaType) {
     } catch (e) {
         console.log("[DEBUG-FP] Global Error:", e.message);
     }
-    console.log(`[DEBUG-FP] Finished. Found ${results.length} streams.`);
+
+    console.log(`[DEBUG-FP] Finished. Found ${results.length} movie streams.`);
     return results;
 }
 module.exports = { getStreams };
