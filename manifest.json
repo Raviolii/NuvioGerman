@@ -5,7 +5,7 @@
     {
       "id": "s-to",
       "name": "S.to",
-      "description": "Serien.to - Largest German series database",
+      "description": "Serien.to - Größte deutsche Serien-Datenbank",
       "version": "1.0.0",
       "author": "R4VEolii",
       "supportedTypes": [
@@ -20,7 +20,10 @@
       "logo": "https://s.to/favicon.ico",
       "contentLanguage": [
         "de"
-      ]
+      ],
+      "requires": {
+        "tmdb_api": true
+      }
     }
   ]
 }
