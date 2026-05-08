@@ -10,7 +10,6 @@
       "author": "R4VEolii",
       "supportedTypes": [
         "movie",
-        "series"
       ],
       "filename": "src/providers/FilmpalastTo.js",
       "enabled": true,
