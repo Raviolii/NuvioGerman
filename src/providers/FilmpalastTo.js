@@ -1,53 +1,136 @@
-var cheerio = require('cheerio-without-node-native');
-var BASE_URL = 'https://filmpalast.to';
-var TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
-var TMDB_BASE_URL = 'https://api.themoviedb.org/3';
+const cheerio = require('cheerio-without-node-native');
 
-var DEFAULT_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+const BASE_URL = 'https://filmpalast.to';
+const TMDB_API_KEY = '439c478a771f35c05022f9feabcca01c';
+const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
+
+const DEFAULT_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9,de;q=0.8',
+    'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
 };
 
+// Manual Cookie Jar
+let cookieJar = {};
+
+async function fetchWithCookies(url, options = {}) {
+    const headers = { ...DEFAULT_HEADERS, ...options.headers || {} };
+
+    const domain = new URL(url).hostname;
+    if (cookieJar[domain]) {
+        headers['Cookie'] = Object.entries(cookieJar[domain])
+            .map(([k, v]) => `${k}=${v}`)
+            .join('; ');
+    }
+
+    const res = await fetch(url, { ...options, headers });
+
+    // Save cookies
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) {
+        if (!cookieJar[domain]) cookieJar[domain] = {};
+        const cookies = setCookie.split(',').map(c => c.trim());
+        cookies.forEach(cookieStr => {
+            const [part] = cookieStr.split(';');
+            const [name, value] = part.split('=').map(x => x.trim());
+            if (name && value) cookieJar[domain][name] = value;
+        });
+    }
+
+    return res;
+}
+
 // ==========================================
-// 1. HELPER UTILS
+// HELPERS
 // ==========================================
 function b64decode(str) {
-    var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    var result = "";
-    var i = 0;
-    var s = str.replace(/[^A-Za-z0-9+/]/g, "");
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let result = "";
+    let i = 0;
+    let s = str.replace(/[^A-Za-z0-9+/]/g, "");
+
     while (i < s.length) {
-        var a = chars.indexOf(s[i++]);
-        var b = chars.indexOf(s[i++]);
-        var c = i < s.length ? chars.indexOf(s[i++]) : -1;
-        var d = i < s.length ? chars.indexOf(s[i++]) : -1;
-        var cb = c === -1 ? 0 : c;
-        var db = d === -1 ? 0 : d;
-        var n = a << 18 | b << 12 | cb << 6 | db;
-        result += String.fromCharCode(n >> 16 & 255);
-        if (c !== -1) result += String.fromCharCode(n >> 8 & 255);
+        const a = chars.indexOf(s[i++]);
+        const b = chars.indexOf(s[i++]);
+        const c = i < s.length ? chars.indexOf(s[i++]) : -1;
+        const d = i < s.length ? chars.indexOf(s[i++]) : -1;
+
+        const cb = c === -1 ? 0 : c;
+        const db = d === -1 ? 0 : d;
+
+        const n = (a << 18) | (b << 12) | (cb << 6) | db;
+        result += String.fromCharCode((n >> 16) & 255);
+        if (c !== -1) result += String.fromCharCode((n >> 8) & 255);
         if (d !== -1) result += String.fromCharCode(n & 255);
     }
     return result;
 }
 
 function resolveRelativeUrl(href, base) {
-    if (href.indexOf("http") === 0) return href;
-    var m = base.match(/^(https?:\/\/[^/]+)/);
-    var origin = m ? m[1] : "";
-    if (href.charAt(0) === "/") return origin + href;
-    var basePath = base.substring(0, base.lastIndexOf("/") + 1);
+    if (href.startsWith("http")) return href;
+    const m = base.match(/^(https?:\/\/[^/]+)/);
+    const origin = m ? m[1] : "";
+    if (href.startsWith("/")) return origin + href;
+    const basePath = base.substring(0, base.lastIndexOf("/") + 1);
     return basePath + href;
 }
 
 // ==========================================
-// 2. IMPROVED VOE DECODER
+// VOE EXTRACTOR
 // ==========================================
+async function extractVoe(embedUrl) {
+    try {
+        let res = await fetchWithCookies(embedUrl, {
+            headers: { "Referer": "https://voe.sx/" }
+        });
+        let data = await res.text();
+
+        // Redirect handling
+        const redirectMatch = data.match(/window\.location\.href\s*=\s*['"](https:\/\/[^'"]+)['"]/i);
+        if (redirectMatch) {
+            res = await fetchWithCookies(redirectMatch[1], { headers: { "Referer": embedUrl } });
+            data = await res.text();
+        }
+
+        if (data.includes('cf-challenge') || data.includes('Checking your browser')) {
+            console.log("[VOE] Cloudflare blocked");
+            return null;
+        }
+
+        // Main encoded pattern
+        const rMain = data.match(/json">\s*\[?\s*['"]([^'"]+)['"]\s*\]?\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i);
+
+        if (rMain) {
+            const encodedArray = rMain[1];
+            const loaderUrl = resolveRelativeUrl(rMain[2], embedUrl);
+
+            const jsRes = await fetchWithCookies(loaderUrl, { headers: { "Referer": embedUrl } });
+            const jsData = await jsRes.text();
+
+            const replMatch = jsData.match(/(\[(?:'\S{1,30}'[\s,]*){3,30}\])/i);
+
+            if (replMatch) {
+                const decoded = voeDecode(encodedArray, replMatch[1]);
+                if (decoded) {
+                    const streamUrl = decoded.source || decoded.direct_access_url || decoded.file || decoded.url;
+                    if (streamUrl) return streamUrl;
+                }
+            }
+        }
+
+        // HLS Fallback
+        const hlsMatch = data.match(/['"]hls['"]\s*:\s*['"]([^'"]+)['"]/i) || 
+                        data.match(/"hls"\s*:\s*"([^"]+)"/i);
+        if (hlsMatch?.[1]) return hlsMatch[1];
+
+    } catch (e) {
+        console.log("[VOE] Error:", e.message);
+    }
+    return null;
+}
+
 function voeDecode(ct, luts) {
     try {
-        console.log("[DEBUG-VOE] Decoding Payload. Length: " + ct.length);
-
         let lutStr = luts.trim();
         if (lutStr.startsWith('[') && lutStr.endsWith(']')) lutStr = lutStr.slice(1, -1);
 
@@ -80,133 +163,30 @@ function voeDecode(ct, luts) {
 
         return finalStr ? JSON.parse(finalStr) : null;
     } catch (e) {
-        console.log("[DEBUG-VOE] Decode Error: " + e.message);
+        console.log("[VOE Decode Error]", e.message);
         return null;
     }
 }
 
 // ==========================================
-// 3. VOE EXTRACTOR with Enhanced Debugging
-// ==========================================
-async function extractVoe(embedUrl) {
-    try {
-        console.log("\n=== [VOE DEBUG START] ===");
-        console.log("[VOE] Embed URL:", embedUrl);
-
-        // 1. Initial Request
-        var res = await fetch(embedUrl, {
-            headers: {
-                "Referer": "https://voe.sx/",
-                "User-Agent": DEFAULT_HEADERS['User-Agent']
-            }
-        });
-
-        var data = await res.text();
-        console.log(`[VOE] Initial HTML Length: ${data.length}`);
-
-        // === DEBUG: Show beginning of HTML ===
-        console.log("[VOE] HTML Preview (first 800 chars):");
-        console.log(data.substring(0, 800));
-
-        // Handle redirect
-        var redirectMatch = data.match(/window\.location\.href\s*=\s*['"](https:\/\/[^'"]+)['"]/i);
-        if (redirectMatch) {
-            var jumpUrl = redirectMatch[1];
-            console.log("[VOE] 🔄 Redirect detected →", jumpUrl);
-
-            var res2 = await fetch(jumpUrl, {
-                headers: {
-                    "Referer": embedUrl,
-                    "User-Agent": DEFAULT_HEADERS['User-Agent']
-                }
-            });
-            data = await res2.text();
-            console.log(`[VOE] After Redirect - HTML Length: ${data.length}`);
-            console.log("[VOE] HTML Preview after redirect:");
-            console.log(data.substring(0, 900));
-        }
-
-        if (data.includes('Checking your browser') || data.includes('cf-challenge')) {
-            console.log("❌ [VOE] Cloudflare / Bot Protection detected!");
-            return null;
-        }
-
-        // 2. Look for encoded data + script
-        var rMain = data.match(/json">\s*\[?\s*['"]([^'"]+)['"]\s*\]?\s*<\/script>\s*<script[^>]*src=['"]([^'"]+)['"]/i);
-        
-        if (rMain) {
-            console.log("✅ [VOE] Found encoded JSON + loader script");
-            var encodedArray = rMain[1];
-            var loaderUrl = resolveRelativeUrl(rMain[2], embedUrl);
-            console.log("[VOE] Loader Script URL:", loaderUrl);
-
-            var jsRes = await fetch(loaderUrl, { headers: { "Referer": embedUrl } });
-            var jsData = await jsRes.text();
-
-            console.log(`[VOE] Loader JS Length: ${jsData.length}`);
-            console.log("[VOE] Loader JS Preview:");
-            console.log(jsData.substring(0, 700));
-
-            // Find LUT array
-            var replMatch = jsData.match(/(\[(?:'\S{1,30}'[\s,]*){3,30}\])/i);
-
-            if (replMatch) {
-                console.log("✅ [VOE] LUT Array found!");
-                console.log("[VOE] LUT Sample:", replMatch[1].substring(0, 150) + "...");
-                
-                var decoded = voeDecode(encodedArray, replMatch[1]);
-                if (decoded) {
-                    console.log("🎉 [VOE] Decode SUCCESS!");
-                    console.log("[VOE] Decoded Keys:", Object.keys(decoded));
-                    const streamUrl = decoded.source || decoded.direct_access_url || decoded.file;
-                    console.log("[VOE] Final Stream URL:", streamUrl);
-                    return streamUrl;
-                } else {
-                    console.log("❌ [VOE] Decode returned null");
-                }
-            } else {
-                console.log("❌ [VOE] LUT array not found in JS");
-            }
-        } else {
-            console.log("❌ [VOE] Main encoded pattern not found");
-        }
-
-        // Fallback HLS search
-        var hlsMatch = data.match(/['"]hls['"]\s*:\s*['"]([^'"]+)['"]/i) || 
-                       data.match(/"hls"\s*:\s*"([^"]+)"/i);
-        if (hlsMatch) {
-            console.log("✅ [VOE] HLS fallback found:", hlsMatch[1]);
-            return hlsMatch[1];
-        }
-
-        console.log("❌ [VOE] No stream found");
-    } catch (err) {
-        console.log("💥 [VOE EXCEPTION]", err.message);
-    }
-    return null;
-}
-
-// ==========================================
-// VIDARA EXTRACTOR (unchanged)
+// VIDARA EXTRACTOR
 // ==========================================
 async function extractVidara(urlStr) {
     try {
-        console.log("[DEBUG-Vidara] Extracting:", urlStr);
-        var filecodeMatch = urlStr.match(/\/(?:e|v|f)\/([a-zA-Z0-9]+)/);
+        const filecodeMatch = urlStr.match(/\/(?:e|v|f)\/([a-zA-Z0-9]+)/);
         if (!filecodeMatch) return null;
 
-        var apiBase = urlStr.split('/')[0] + '//' + urlStr.split('/')[2];
+        const apiBase = urlStr.split('/')[0] + '//' + urlStr.split('/')[2];
 
-        var pageRes = await fetch(urlStr, { headers: DEFAULT_HEADERS });
-        var pageHtml = await pageRes.text();
+        const pageRes = await fetchWithCookies(urlStr);
+        const pageHtml = await pageRes.text();
 
-        var tokenMatch = pageHtml.match(/key:\s*['"]([^'"]+)['"]/i);
-        var token = tokenMatch ? tokenMatch[1] : null;
+        const tokenMatch = pageHtml.match(/key:\s*['"]([^'"]+)['"]/i);
+        const token = tokenMatch ? tokenMatch[1] : null;
 
-        var response = await fetch(apiBase + '/api/stream', {
+        const response = await fetchWithCookies(apiBase + '/api/stream', {
             method: 'POST',
             headers: {
-                'User-Agent': DEFAULT_HEADERS['User-Agent'],
                 'Content-Type': 'application/json',
                 'Referer': urlStr,
                 'X-Requested-With': 'XMLHttpRequest'
@@ -218,10 +198,10 @@ async function extractVidara(urlStr) {
             })
         });
 
-        var data = await response.json();
+        const data = await response.json();
         return data?.streaming_url || data?.url || null;
     } catch (e) {
-        console.log("[DEBUG-Vidara] Exception:", e.message);
+        console.log("[Vidara] Error:", e.message);
         return null;
     }
 }
@@ -229,73 +209,83 @@ async function extractVidara(urlStr) {
 // ==========================================
 // MAIN FUNCTION
 // ==========================================
-async function getStreams(tmdbId, mediaType) {
-    var results = [];
-    console.log("[DEBUG-FP] Starting search for TMDB ID:", tmdbId);
+async function getStreams(tmdbId, mediaType, season = null, episode = null) {
+    const results = [];
 
     try {
-        // ... (TMDB + Filmpalast logic remains the same)
-        var tmdbUrl = TMDB_BASE_URL + '/' + (mediaType === 'series' ? 'tv' : 'movie') + '/' + tmdbId + '/external_ids?api_key=' + TMDB_API_KEY;
-        var idData = await fetch(tmdbUrl).then(r => r.json());
+        // Get IMDB ID from TMDB
+        const tmdbType = mediaType === 'series' ? 'tv' : 'movie';
+        const idRes = await fetch(`${TMDB_BASE_URL}/${tmdbType}/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`);
+        const idData = await idRes.json();
 
         if (!idData.imdb_id) return [];
 
-        var searchRes = await fetch(BASE_URL + '/autocomplete.php', {
+        // Search on Filmpalast
+        const searchRes = await fetchWithCookies(BASE_URL + '/autocomplete.php', {
             method: 'POST',
-            headers: { 
-                'User-Agent': DEFAULT_HEADERS['User-Agent'], 
-                'Content-Type': 'application/x-www-form-urlencoded' 
-            },
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'term=' + encodeURIComponent(idData.imdb_id)
         });
 
-        var movieList = await searchRes.json();
+        const movieList = await searchRes.json();
         if (!movieList || movieList.length === 0) return [];
 
-        var targetTitle = movieList.find(t => !t.toLowerCase().includes('english')) || movieList[0];
-        var searchPageUrl = BASE_URL + '/search/title/' + encodeURIComponent(targetTitle);
+        const targetTitle = movieList.find(t => !t.toLowerCase().includes('english')) || movieList[0];
 
-        var searchHtml = await fetch(searchPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
-        var $search = cheerio.load(searchHtml);
+        const searchPageUrl = BASE_URL + '/search/title/' + encodeURIComponent(targetTitle);
+        const searchHtml = await (await fetchWithCookies(searchPageUrl)).text();
 
-        var streamAnchor = $search('a[href*="/stream/"]').first();
-        var streamPageUrl = streamAnchor.length > 0 
-            ? BASE_URL + streamAnchor.attr('href').replace('/filmpalast.to', '') 
-            : null;
+        const $search = cheerio.load(searchHtml);
+        const streamAnchor = $search('a[href*="/stream/"]').first();
 
-        if (!streamPageUrl) return [];
+        if (!streamAnchor.length) return [];
 
-        var streamPageHtml = await fetch(streamPageUrl, { headers: DEFAULT_HEADERS }).then(r => r.text());
-        var $stream = cheerio.load(streamPageHtml);
+        let streamPageUrl = BASE_URL + streamAnchor.attr('href');
+        streamPageUrl = streamPageUrl.replace('/filmpalast.to', '');
 
-        var anchors = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a').toArray();
+        const streamPageHtml = await (await fetchWithCookies(streamPageUrl)).text();
+        const $stream = cheerio.load(streamPageHtml);
 
-        for (var anchor of anchors) {
-            var aHref = $stream(anchor).attr('href');
+        const anchors = $stream('.currentStreamLinks a, .hosterSite span a, .streamList a').toArray();
+
+        for (const anchor of anchors) {
+            let aHref = $stream(anchor).attr('href');
             if (!aHref || aHref.includes('javascript')) continue;
 
-            var fullUrl = aHref.startsWith('//') ? 'https:' + aHref 
-                        : (aHref.startsWith('http') ? aHref : 'https://' + aHref);
+            let fullUrl = aHref.startsWith('//') ? 'https:' + aHref :
+                          (aHref.startsWith('http') ? aHref : 'https://' + aHref);
 
             if (fullUrl.includes('voe.sx') || fullUrl.includes('voe-') || fullUrl.includes('unblock')) {
-                var direct = await extractVoe(fullUrl);
+                const direct = await extractVoe(fullUrl);
                 if (direct) {
-                    results.push({ url: direct, meta: { title: "VOE · 1080p", countryCodes: ['de'] } });
+                    results.push({
+                        url: direct,
+                        meta: { title: "VOE · 1080p", countryCodes: ['de'] }
+                    });
                 }
-            } 
+            }
             else if (fullUrl.includes('vidara.') || fullUrl.includes('vidfast.')) {
-                var direct = await extractVidara(fullUrl);
+                const direct = await extractVidara(fullUrl);
                 if (direct) {
-                    results.push({ url: direct, meta: { title: "Vidara · 1080p", countryCodes: ['de'] } });
+                    results.push({
+                        url: direct,
+                        meta: { title: "Vidara · 1080p", countryCodes: ['de'] }
+                    });
                 }
             }
         }
     } catch (e) {
-        console.log("[DEBUG-FP] Global Error:", e.message);
+        console.log("[Filmpalast] Global Error:", e.message);
     }
 
-    console.log(`[DEBUG-FP] Finished. Found ${results.length} streams.`);
+    console.log(`[Filmpalast] Found ${results.length} streams`);
     return results;
 }
 
-module.exports = { getStreams };
+// Nuvio Export
+module.exports = {
+    name: "Filmpalast.to",
+    language: "de",
+    type: ["movie", "series"],
+    getStreams
+};
