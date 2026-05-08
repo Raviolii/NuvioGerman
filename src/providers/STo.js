@@ -8,26 +8,19 @@ var DEFAULT_HEADERS = {
 };
 
 // ==========================================
-// 1. HELPER UTILS
+// 1. REDIRECT HELPER
 // ==========================================
 
-/**
- * S.to specific redirect handler. 
- * It follows the /r/ redirect links to find the actual hoster URL.
- */
-async function getFinalUrl(url, referer) {
+async function getFinalRedirect(url, referer) {
     try {
+        // This follows s.to/r/123 until it reaches voe.sx/e/abc
         const response = await fetch(url, {
             method: 'GET',
-            redirect: 'follow',
-            headers: {
-                ...DEFAULT_HEADERS,
-                'Referer': referer
-            }
+            headers: { ...DEFAULT_HEADERS, 'Referer': referer },
+            redirect: 'follow'
         });
         return response.url;
     } catch (e) {
-        console.log("[S.TO] Redirect Error:", e.message);
         return url;
     }
 }
@@ -40,63 +33,52 @@ async function getStreams(imdbId, type, season, episode) {
     if (type !== 'series') return [];
     
     var results = [];
-    console.log("[S.TO] Searching for Series IMDb:", imdbId);
 
     try {
-        // 1. Search by IMDb ID
-        var searchUrl = BASE_URL + '/suche?term=' + imdbId;
+        // 1. Search for series path
+        var searchUrl = `${BASE_URL}/suche?term=${imdbId}`;
         var searchRes = await fetch(searchUrl, { headers: DEFAULT_HEADERS });
         var searchHtml = await searchRes.text();
         var $search = cheerio.load(searchHtml);
 
-        // 2. Get the series relative path
         var relativeSeriesLink = $search('.col-6.col-md-4.col-lg-2 a.show-cover').attr('href');
-        if (!relativeSeriesLink) {
-            console.log("[S.TO] No series found for ID");
-            return [];
-        }
+        if (!relativeSeriesLink) return [];
 
-        // 3. Build the specific Episode URL
-        // Format: https://s.to/serie/stream/[name]/staffel-[x]/episode-[y]
-        var targetUrl = BASE_URL + relativeSeriesLink + '/staffel-' + (season || 1) + '/episode-' + (episode || 1);
-        console.log("[S.TO] Target URL:", targetUrl);
-
+        // 2. Go to Episode Page
+        var targetUrl = `${BASE_URL}${relativeSeriesLink}/staffel-${season || 1}/episode-${episode || 1}`;
         var epRes = await fetch(targetUrl, { headers: DEFAULT_HEADERS });
         var epHtml = await epRes.text();
         var $ep = cheerio.load(epHtml);
 
-        // 4. Target German links (data-language-id="1")
+        // 3. Get German links
         var linkBoxes = $ep('button.link-box[data-language-id="1"]').toArray();
         
         for (var el of linkBoxes) {
             var playPath = $ep(el).attr('data-play-url');
-            var hosterName = $ep(el).attr('data-provider-name') || 'Unknown';
+            var hosterName = $ep(el).attr('data-provider-name') || 'Hoster';
 
             if (!playPath) continue;
 
-            // 5. Resolve the redirect
-            // S.to links are typically /r/12345 which redirect to Voe, Doodstream, etc.
-            var fullRedirectUrl = BASE_URL + playPath;
-            var finalStreamUrl = await getFinalUrl(fullRedirectUrl, targetUrl);
+            // 4. Resolve the s.to redirect to get the raw Hoster URL
+            var redirectUrl = BASE_URL + playPath;
+            var rawHosterUrl = await getFinalRedirect(redirectUrl, targetUrl);
 
-            // Filter out internal s.to links that failed to redirect
-            if (finalStreamUrl.includes('s.to/r/')) continue;
-
-            results.push({
-                url: finalStreamUrl,
-                meta: {
-                    title: hosterName + " (DE) - S" + season + "E" + episode,
-                    countryCodes: ['de'],
-                    sourceLabel: "S.to"
-                }
-            });
+            // 5. Push the raw URL directly to the app
+            if (rawHosterUrl) {
+                results.push({
+                    url: rawHosterUrl, // This will be the https://voe.sx/e/... link
+                    meta: {
+                        title: `${hosterName} (DE) - S${season}E${episode}`,
+                        countryCodes: ['de'],
+                        sourceLabel: "S.to"
+                    }
+                });
+            }
         }
-
     } catch (e) {
-        console.log("[S.TO] Global Error:", e.message);
+        console.log("[S.TO] Error:", e.message);
     }
 
-    console.log("[S.TO] Found " + results.length + " German streams.");
     return results;
 }
 
