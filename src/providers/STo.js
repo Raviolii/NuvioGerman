@@ -10,119 +10,83 @@ var DEFAULT_HEADERS = {
     'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
 };
 
-// ==========================================
-// 1. REDIRECT HELPER (With Debugging)
-// ==========================================
-async function getFinalRedirect(url, referer) {
-    try {
-        console.log(`[S.TO] Resolving redirect: ${url}`);
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: { ...DEFAULT_HEADERS, 'Referer': referer },
-            redirect: 'follow'
-        });
-        console.log(`[S.TO] Redirect resolved to: ${response.url}`);
-        return response.url;
-    } catch (e) {
-        console.error(`[S.TO] Redirect Error for ${url}:`, e.message);
-        return url;
-    }
+// 1. Helper to resolve redirects without async
+function getFinalRedirect(url, referer) {
+    return fetch(url, {
+        method: 'GET',
+        headers: Object.assign({}, DEFAULT_HEADERS, { 'Referer': referer }),
+        redirect: 'follow'
+    })
+    .then(function(res) { return res.url; })
+    .catch(function() { return url; });
 }
 
-// ==========================================
-// 2. MAIN FUNCTION (With Debugging)
-// ==========================================
-async function getStreams(tmdbId, type, season, episode) {
-    if (type !== 'series') {
-        console.log("[S.TO] Skip: Type is not 'series'");
-        return [];
+// 2. Main function using Promise chains
+function getStreams(tmdbId, type, season, episode) {
+    if (type !== 'series' && type !== 'show' && type !== 'tv') {
+        return Promise.resolve([]);
     }
-    
-    var results = [];
-    console.log(`\n--- [S.TO] Starting Search: ID ${tmdbId} (S${season}E${episode}) ---`);
 
-    try {
-        // Schritt A: TMDB API
-        var tmdbUrl = `${TMDB_BASE_URL}/tv/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`;
-        console.log(`[S.TO] Fetching IMDB ID from TMDB...`);
-        var idRes = await fetch(tmdbUrl);
-        
-        if (!idRes.ok) throw new Error(`TMDB API returned status ${idRes.status}`);
-        
-        var idData = await idRes.json();
-        var imdbId = idData.imdb_id;
+    // Start the chain
+    return fetch(TMDB_BASE_URL + '/tv/' + tmdbId + '/external_ids?api_key=' + TMDB_API_KEY)
+        .then(function(res) { return res.json(); })
+        .then(function(idData) {
+            if (!idData.imdb_id) throw new Error("No IMDB ID");
+            return fetch(BASE_URL + '/suche?term=' + idData.imdb_id, { headers: DEFAULT_HEADERS });
+        })
+        .then(function(searchRes) {
+            return searchRes.text().then(function(html) {
+                var $ = cheerio.load(html);
+                var path = $('.col-6.col-md-4.col-lg-2 a.show-cover').attr('href');
+                if (!path && html.includes('series-title')) {
+                    path = new URL(searchRes.url).pathname;
+                }
+                return path;
+            });
+        })
+        .then(function(seriesPath) {
+            if (!seriesPath) return [];
+            var targetUrl = BASE_URL + seriesPath + '/staffel-' + season + '/episode-' + episode;
+            
+            return fetch(targetUrl, { headers: DEFAULT_HEADERS })
+                .then(function(res) { return res.text(); })
+                .then(function(epHtml) {
+                    var $ep = cheerio.load(epHtml);
+                    var linkBoxes = $ep('button.link-box[data-language-id="1"]').toArray();
+                    
+                    // Map boxes to an array of redirect promises
+                    var promises = linkBoxes.map(function(el) {
+                        var playPath = $ep(el).attr('data-play-url');
+                        var hosterName = $ep(el).attr('data-provider-name') || 'Hoster';
+                        if (!playPath) return Promise.resolve(null);
 
-        if (!imdbId) {
-            console.warn("[S.TO] Abort: No IMDB-ID found for this TMDB ID.");
-            return [];
-        }
-        console.log(`[S.TO] Found IMDB ID: ${imdbId}`);
+                        return getFinalRedirect(BASE_URL + playPath, targetUrl)
+                            .then(function(finalUrl) {
+                                if (finalUrl && finalUrl.indexOf('s.to/r/') === -1) {
+                                    return {
+                                        url: finalUrl,
+                                        meta: {
+                                            title: hosterName + ' (DE) - S' + season + 'E' + episode,
+                                            countryCodes: ['de'],
+                                            sourceLabel: "S.to"
+                                        }
+                                    };
+                                }
+                                return null;
+                            });
+                    });
 
-        // Schritt B: Suche auf s.to
-        var searchUrl = `${BASE_URL}/suche?term=${imdbId}`;
-        console.log(`[S.TO] Searching S.TO: ${searchUrl}`);
-        var searchRes = await fetch(searchUrl, { headers: DEFAULT_HEADERS });
-        var searchHtml = await searchRes.text();
-        var $search = cheerio.load(searchHtml);
-
-        var relativeSeriesLink = $search('.col-6.col-md-4.col-lg-2 a.show-cover').attr('href');
-        
-        if (!relativeSeriesLink) {
-            console.warn("[S.TO] Scraping Error: Series link not found in search results. Check if selector changed.");
-            // Log a snippet of HTML to see what's actually there
-            console.debug("[S.TO] Search HTML Sample:", searchHtml.substring(0, 500));
-            return [];
-        }
-        console.log(`[S.TO] Found series path: ${relativeSeriesLink}`);
-
-        // Schritt C: Episoden-Seite
-        var targetUrl = `${BASE_URL}${relativeSeriesLink}/staffel-${season || 1}/episode-${episode || 1}`;
-        console.log(`[S.TO] Navigating to Episode: ${targetUrl}`);
-        var epRes = await fetch(targetUrl, { headers: DEFAULT_HEADERS });
-        
-        if (epRes.status === 404) {
-            console.error(`[S.TO] 404: Episode or Season not found at ${targetUrl}`);
-            return [];
-        }
-
-        var epHtml = await epRes.text();
-        var $ep = cheerio.load(epHtml);
-
-        // Schritt D: Links extrahieren
-        var linkBoxes = $ep('button.link-box[data-language-id="1"]').toArray();
-        console.log(`[S.TO] Found ${linkBoxes.length} German stream links.`);
-        
-        for (var el of linkBoxes) {
-            var playPath = $ep(el).attr('data-play-url');
-            var hosterName = $ep(el).attr('data-provider-name') || 'Hoster';
-
-            if (!playPath) {
-                console.warn(`[S.TO] Missing data-play-url for ${hosterName}`);
-                continue;
-            }
-
-            var redirectUrl = BASE_URL + playPath;
-            var rawHosterUrl = await getFinalRedirect(redirectUrl, targetUrl);
-
-            if (rawHosterUrl && rawHosterUrl !== redirectUrl) {
-                results.push({
-                    url: rawHosterUrl,
-                    meta: {
-                        title: `${hosterName} (DE) - S${season}E${episode}`,
-                        countryCodes: ['de'],
-                        sourceLabel: "S.to"
-                    }
+                    return Promise.all(promises);
                 });
-            } else {
-                console.warn(`[S.TO] Failed to resolve a valid external hoster link for ${hosterName}`);
-            }
-        }
-    } catch (e) {
-        console.error("[S.TO] Critical Error:", e);
-    }
-
-    console.log(`[S.TO] Search finished. Found ${results.length} results.\n`);
-    return results;
+        })
+        .then(function(results) {
+            // Filter out the nulls
+            return results.filter(function(item) { return item !== null; });
+        })
+        .catch(function(err) {
+            console.log("[S.TO] Error: " + err.message);
+            return [];
+        });
 }
 
 module.exports = { getStreams };
