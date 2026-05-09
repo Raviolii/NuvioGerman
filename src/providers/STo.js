@@ -11,76 +11,100 @@ var DEFAULT_HEADERS = {
 };
 
 // ==========================================
-// 1. REDIRECT HELPER
+// 1. REDIRECT HELPER (With Debugging)
 // ==========================================
 async function getFinalRedirect(url, referer) {
     try {
+        console.log(`[S.TO] Resolving redirect: ${url}`);
         const response = await fetch(url, {
             method: 'GET',
             headers: { ...DEFAULT_HEADERS, 'Referer': referer },
             redirect: 'follow'
         });
+        console.log(`[S.TO] Redirect resolved to: ${response.url}`);
         return response.url;
     } catch (e) {
+        console.error(`[S.TO] Redirect Error for ${url}:`, e.message);
         return url;
     }
 }
 
 // ==========================================
-// 2. MAIN FUNCTION
+// 2. MAIN FUNCTION (With Debugging)
 // ==========================================
 async function getStreams(tmdbId, type, season, episode) {
-    // s.to unterstützt nur Serien
-    if (type !== 'series') return [];
+    if (type !== 'series') {
+        console.log("[S.TO] Skip: Type is not 'series'");
+        return [];
+    }
     
     var results = [];
-    console.log("[S.TO] Suche gestartet für TMDB ID:", tmdbId);
+    console.log(`\n--- [S.TO] Starting Search: ID ${tmdbId} (S${season}E${episode}) ---`);
 
     try {
-        // Schritt A: IMDB-ID via TMDB API holen
+        // Schritt A: TMDB API
         var tmdbUrl = `${TMDB_BASE_URL}/tv/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`;
+        console.log(`[S.TO] Fetching IMDB ID from TMDB...`);
         var idRes = await fetch(tmdbUrl);
+        
+        if (!idRes.ok) throw new Error(`TMDB API returned status ${idRes.status}`);
+        
         var idData = await idRes.json();
         var imdbId = idData.imdb_id;
 
         if (!imdbId) {
-            console.log("[S.TO] Keine IMDB-ID gefunden.");
+            console.warn("[S.TO] Abort: No IMDB-ID found for this TMDB ID.");
             return [];
         }
+        console.log(`[S.TO] Found IMDB ID: ${imdbId}`);
 
-        // Schritt B: Suche auf s.to mit der IMDB-ID
+        // Schritt B: Suche auf s.to
         var searchUrl = `${BASE_URL}/suche?term=${imdbId}`;
+        console.log(`[S.TO] Searching S.TO: ${searchUrl}`);
         var searchRes = await fetch(searchUrl, { headers: DEFAULT_HEADERS });
         var searchHtml = await searchRes.text();
         var $search = cheerio.load(searchHtml);
 
-        // Link zur Serie finden
         var relativeSeriesLink = $search('.col-6.col-md-4.col-lg-2 a.show-cover').attr('href');
+        
         if (!relativeSeriesLink) {
-            console.log("[S.TO] Serie nicht gefunden.");
+            console.warn("[S.TO] Scraping Error: Series link not found in search results. Check if selector changed.");
+            // Log a snippet of HTML to see what's actually there
+            console.debug("[S.TO] Search HTML Sample:", searchHtml.substring(0, 500));
+            return [];
+        }
+        console.log(`[S.TO] Found series path: ${relativeSeriesLink}`);
+
+        // Schritt C: Episoden-Seite
+        var targetUrl = `${BASE_URL}${relativeSeriesLink}/staffel-${season || 1}/episode-${episode || 1}`;
+        console.log(`[S.TO] Navigating to Episode: ${targetUrl}`);
+        var epRes = await fetch(targetUrl, { headers: DEFAULT_HEADERS });
+        
+        if (epRes.status === 404) {
+            console.error(`[S.TO] 404: Episode or Season not found at ${targetUrl}`);
             return [];
         }
 
-        // Schritt C: Episoden-Seite aufrufen
-        var targetUrl = `${BASE_URL}${relativeSeriesLink}/staffel-${season || 1}/episode-${episode || 1}`;
-        var epRes = await fetch(targetUrl, { headers: DEFAULT_HEADERS });
         var epHtml = await epRes.text();
         var $ep = cheerio.load(epHtml);
 
-        // Schritt D: Deutsche Links extrahieren (data-language-id="1")
+        // Schritt D: Links extrahieren
         var linkBoxes = $ep('button.link-box[data-language-id="1"]').toArray();
+        console.log(`[S.TO] Found ${linkBoxes.length} German stream links.`);
         
         for (var el of linkBoxes) {
             var playPath = $ep(el).attr('data-play-url');
             var hosterName = $ep(el).attr('data-provider-name') || 'Hoster';
 
-            if (!playPath) continue;
+            if (!playPath) {
+                console.warn(`[S.TO] Missing data-play-url for ${hosterName}`);
+                continue;
+            }
 
-            // Redirect auflösen (von s.to/r/... zum echten Hoster wie voe.sx)
             var redirectUrl = BASE_URL + playPath;
             var rawHosterUrl = await getFinalRedirect(redirectUrl, targetUrl);
 
-            if (rawHosterUrl) {
+            if (rawHosterUrl && rawHosterUrl !== redirectUrl) {
                 results.push({
                     url: rawHosterUrl,
                     meta: {
@@ -89,12 +113,15 @@ async function getStreams(tmdbId, type, season, episode) {
                         sourceLabel: "S.to"
                     }
                 });
+            } else {
+                console.warn(`[S.TO] Failed to resolve a valid external hoster link for ${hosterName}`);
             }
         }
     } catch (e) {
-        console.log("[S.TO] Fehler:", e.message);
+        console.error("[S.TO] Critical Error:", e);
     }
 
+    console.log(`[S.TO] Search finished. Found ${results.length} results.\n`);
     return results;
 }
 
