@@ -27,7 +27,7 @@ async function start() {
 
     // 2. Test S.to (Series)
     // Using 'The Boys' IMDb ID (tt1190634) - S.to uses IMDb IDs for its search
-    const theBoysImdb = "tt1190634"; 
+    const theBoysTmdb = "76479"; 
     await runTest("S.to", sto, theBoysImdb, "series", 1, 1);
 }
 
