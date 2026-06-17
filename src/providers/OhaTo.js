@@ -134,7 +134,7 @@ function getFinalRedirect(url) {
     .catch(function() { return url; });
 }
 
-function handleLegacyLinksFlow(ohaId, fallbackTitle) {
+function handleLegacyLinksFlow(ohaId) {
     var linksUrl = BASE_URL + '/web-vod/api/links?id=' + ohaId;
 
     return fetch(linksUrl, { headers: DEFAULT_HEADERS })
@@ -164,8 +164,8 @@ function handleLegacyLinksFlow(ohaId, fallbackTitle) {
 
                             return resolveDirectMediaUrl(normalizedUrl, language).then(function(directUrl) {
                                 return {
-                                    name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + hostDomain,
-                                    title: fallbackTitle,
+                                    name: language.toUpperCase() + ' - ' + qualityTag,
+                                    title: hostDomain,
                                     url: directUrl,
                                     quality: qualityTag,
                                     size: 'Unknown',
@@ -180,8 +180,8 @@ function handleLegacyLinksFlow(ohaId, fallbackTitle) {
 
                         var standardDomain = extractDomain(finalUrl);
                         return {
-                            name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + standardDomain,
-                            title: fallbackTitle,
+                            name: language.toUpperCase() + ' - ' + qualityTag,
+                            title: standardDomain,
                             url: finalUrl,
                             quality: qualityTag,
                             size: 'Unknown',
@@ -267,15 +267,6 @@ function handleLokkeFlow(movieData) {
                 }
 
                 var qualityTag = s.tag || s.quality || 'HD';
-                
-                var mediaTitle = movieData.name;
-                if (movieData.episode && movieData.episode.season) {
-                    mediaTitle += ' S' + movieData.episode.season + 'E' + movieData.episode.episode;
-                }
-                if (movieData.releaseDate) {
-                    var yearMatch = movieData.releaseDate.match(/^\d{4}/);
-                    if (yearMatch) mediaTitle += ' (' + yearMatch[0] + ')';
-                }
 
                 if (urlStr.indexOf('dood') !== -1 || urlStr.indexOf('/w/') !== -1) {
                     var normalizedDood = normalizeDoodUrl(urlStr);
@@ -283,8 +274,8 @@ function handleLokkeFlow(movieData) {
 
                     return resolveDirectMediaUrl(normalizedDood, language).then(function(directUrl) {
                         return {
-                            name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + doodDomain,
-                            title: mediaTitle,
+                            name: language.toUpperCase() + ' - ' + qualityTag,
+                            title: doodDomain,
                             url: directUrl,
                             quality: qualityTag,
                             size: s.size || 'Unknown',
@@ -299,8 +290,8 @@ function handleLokkeFlow(movieData) {
 
                 var targetDomain = extractDomain(urlStr);
                 return Promise.resolve({
-                    name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + targetDomain,
-                    title: mediaTitle,
+                    name: language.toUpperCase() + ' - ' + qualityTag,
+                    title: targetDomain,
                     url: urlStr,
                     quality: qualityTag,
                     size: s.size || 'Unknown',
@@ -332,10 +323,8 @@ function getStreams(tmdbId, type, season, episode) {
             return res.json();
         })
         .then(function(vodData) {
-            var fallbackTitle = (vodData && (vodData.name || vodData.title)) || 'Media Title';
-            
             if (!vodData) {
-                return handleLegacyLinksFlow(ohaId, fallbackTitle);
+                return handleLegacyLinksFlow(ohaId);
             }
 
             var dynamicMovieData = {
@@ -346,7 +335,7 @@ function getStreams(tmdbId, type, season, episode) {
                     tmdb_id: String(vodData.tmdb_id || vodData.tmdbId || tmdbId),
                     imdb_id: String(vodData.imdb_id || vodData.imdbId || '')
                 },
-                name: fallbackTitle,
+                name: (vodData.name || vodData.title || 'Media Title'),
                 originalName: vodData.original_name || vodData.originalTitle || vodData.name || vodData.title,
                 releaseDate: vodData.release_date || vodData.releaseDate,
                 nameTranslations: vodData.nameTranslations || { de: vodData.name || vodData.title },
