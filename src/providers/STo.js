@@ -19,42 +19,35 @@ function extractDomain(url) {
 }
 
 /**
- * Safely decodes S.to's base64 gateway parameter to extract the raw host destination
+ * Automatically captures the target destination location header from the gateway wrapper link
  */
-function decodeHosterToken(playPath, hosterName) {
+async function resolveGatewayRedirect(playPath, hosterName) {
+    if (!playPath) return null;
+    var targetUrl = playPath.startsWith('http') ? playPath : BASE_URL + playPath;
+
     try {
-        if (!playPath || !playPath.includes('?t=')) return null;
-        
-        // Extract the base64 string from the ?t= URL parameter
-        var base64Token = playPath.split('?t=')[1];
-        if (!base64Token) return null;
-        
-        // URL-decode if necessary, then convert base64 to a raw UTF-8 string
-        var decodedParam = decodeURIComponent(base64Token);
-        var rawJsonText = Buffer.from(decodedParam, 'base64').toString('utf-8');
-        var payload = JSON.parse(rawJsonText);
-        
-        // If S.to leaked the fallback target property inside the token payload:
-        if (payload.url) return payload.url;
-        if (payload.target) return payload.target;
-        if (payload.link) return payload.link;
+        // Intercept the redirect before the browser takes action
+        var response = await fetch(targetUrl, {
+            method: 'GET',
+            headers: DEFAULT_HEADERS,
+            redirect: 'manual' 
+        });
+
+        // Read the true destination from the HTTP Location header
+        var trueDestination = response.headers.get('location');
+        if (trueDestination) {
+            return trueDestination;
+        }
     } catch (e) {
-        // Fallback gracefully if base64 structure changes
+        // Fallback catch-all if connection fails
     }
 
-    // Hard-coded structural fallback using standard URL routing schemas for top hosters
+    // Default structural layout fallback
     var nameLower = hosterName.toLowerCase();
-    if (nameLower.includes('voe')) {
-        return 'https://voe.sx';
-    } else if (nameLower.includes('dood')) {
-        return 'https://dood.yt';
-    } else if (nameLower.includes('streamtape')) {
-        return 'https://streamtape.com';
-    } else if (nameLower.includes('vidoza')) {
-        return 'https://vidoza.net';
-    }
-    
-    return BASE_URL + playPath;
+    if (nameLower.includes('voe')) return 'https://voe.sx';
+    if (nameLower.includes('dood')) return 'https://dood.yt';
+    if (nameLower.includes('streamtape')) return 'https://streamtape.com';
+    return targetUrl;
 }
 
 async function getStreams(tmdbId, type, season, episode) {
@@ -101,8 +94,8 @@ async function getStreams(tmdbId, type, season, episode) {
             var hosterName = $ep(el).attr('data-provider-name') || $ep(el).find('h4').text().trim() || 'Hoster';
             var playPath = $ep(el).attr('data-play-url') || '';
             
-            // Decode the redirect link directly using our token extractor
-            var finalHosterUrl = decodeHosterToken(playPath, hosterName);
+            // Resolve the gateway parameter to extract the real long URL path
+            var finalHosterUrl = await resolveGatewayRedirect(playPath, hosterName);
 
             if (finalHosterUrl) {
                 var hostDomain = extractDomain(finalHosterUrl);
