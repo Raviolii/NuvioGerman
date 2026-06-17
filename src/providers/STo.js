@@ -8,9 +8,11 @@ var LOKKE_PING_URL = 'https://www.lokke.app/api/app/ping';
 var OHA_RESOLVE_URL = 'https://oha.to/web-vod/mediaurl-resolve.json';
 
 var DEFAULT_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache'
 };
 
 var VOE_MIRRORS = [
@@ -173,11 +175,12 @@ function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
     .catch(function() { return { url: finalTargetUrl, signature: null }; });
 }
 
+// Optimized method tracking redirect strings explicitly
 async function getFinalRedirect(url, referer) {
     try {
-        console.log(`[S.TO] Loading redirect wrapper page: ${url}`);
+        console.log(`[S.TO] Requesting secure gate extraction: ${url}`);
         
-        // Emulate explicit context headers to skip anti-bot challenge walls
+        // Emulate explicit browser navigation headers to bypass cookie challenge walls
         const response = await fetch(url, {
             method: 'GET',
             headers: {
@@ -185,44 +188,52 @@ async function getFinalRedirect(url, referer) {
                 'Referer': referer,
                 'Sec-Fetch-Dest': 'document',
                 'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'same-origin'
-            }
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1'
+            },
+            redirect: 'follow'
         });
         
+        // Check if standard HTTP location header strategy immediately broke out
+        if (response.url && !response.url.includes('s.to/r')) {
+            console.log(`[S.TO] HTTP Redirection succeeded: ${response.url}`);
+            return response.url;
+        }
+
         const html = await response.text();
         const $ = cheerio.load(html);
         
-        // 1. Structural DOM Scraping
+        // 1. Structural Anchor Scraping
         let targetLink = $('a.watchEpisode').attr('href') || 
                          $('.redirect-link').attr('href') || 
                          $('a[target="_blank"]').filter((i, el) => $(el).text().toLowerCase().includes('weiter')).attr('href');
         
-        // 2. Direct script location mapping regex
+        // 2. Direct JavaScript assignment tracking
         if (!targetLink) {
             const pattern = /(?:window\.location\.href|window\.location|location\.replace)\s*=\s*['"]([^'"]+)['"]/i;
             const match = html.match(pattern);
             if (match) targetLink = match[1];
         }
 
-        // 3. Raw target token fallback string verification
+        // 3. Raw target token streaming validation fallback
         if (!targetLink) {
-            const rawUrlMatch = html.match(/https?:\/\/(?:[a-z0-9-]+\.)*(?:voe|dood|stream|ds2play|delivery)[^\s'"`>]+/i);
+            const rawUrlMatch = html.match(/https?:\/\/(?:[a-z0-9-]+\.)*(?:voe|dood|stream|ds2play|delivery|myvid|all3do)[^\s'"`>]+/i);
             if (rawUrlMatch) targetLink = rawUrlMatch[0];
         }
         
         if (targetLink) {
-            // Unescape any potential entities
-            targetLink = targetLink.replace(/&amp;/g, '&');
+            targetLink = targetLink.replace(/&amp;/g, '&').replace(/\\/g, '');
             if (targetLink.startsWith('/')) {
                 targetLink = BASE_URL + targetLink;
             }
-            console.log(`[S.TO] Extracted true Hoster URL: ${targetLink}`);
+            console.log(`[S.TO] Successfully verified destination link: ${targetLink}`);
             return targetLink;
         }
 
         return response.url;
     } catch (e) {
-        console.error(`[S.TO] Redirect tracking failed: ${e.message}`);
+        console.error(`[S.TO] Redirect processing tracking threw an exception: ${e.message}`);
         return url;
     }
 }
@@ -265,7 +276,6 @@ async function getStreams(tmdbId, type, season, episode) {
         var epHtml = await epRes.text();
         var $ep = cheerio.load(epHtml);
 
-        // Fetch both primary and backup container anchors
         var linkBoxes = $ep('button.link-box[data-language-id="1"]').toArray();
         console.log(`[S.TO] Found ${linkBoxes.length} potential German streams.`);
         
@@ -276,6 +286,14 @@ async function getStreams(tmdbId, type, season, episode) {
 
             var redirectUrl = BASE_URL + playPath;
             var rawHosterUrl = await getFinalRedirect(redirectUrl, targetUrl);
+
+            // Double check if redirect was solved, if not try parsing alternative tag attributes
+            if (!rawHosterUrl || rawHosterUrl.includes('s.to/r')) {
+                var alternativeTarget = $ep(el).attr('data-link-target') || $ep(el).attr('href');
+                if (alternativeTarget && !alternativeTarget.includes('s.to/r')) {
+                    rawHosterUrl = alternativeTarget;
+                }
+            }
 
             if (rawHosterUrl && !rawHosterUrl.includes('s.to/r')) {
                 var cleanUrl = normalizeVoeUrl(normalizeDoodUrl(rawHosterUrl));
