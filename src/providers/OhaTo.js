@@ -3,6 +3,7 @@ var cheerio = require('cheerio-without-node-native');
 var BASE_URL = 'https://oha.to';
 var API_KEY = 'ov262WdL5UdUUz4mwsOKLCFy3mLmLKXiN3Yz';
 var LOKKE_PING_URL = 'https://www.lokke.app/api/app/ping';
+var OHA_RESOLVE_URL = 'https://oha.to/web-vod/mediaurl-resolve.json';
 var OHA_ITEM_URL = 'https://oha.to/mediaurl-item.json';
 var OHA_SOURCE_URL = 'https://oha.to/mediaurl-source.json';
 
@@ -13,58 +14,9 @@ var DEFAULT_HEADERS = {
     'Referer': BASE_URL + '/'
 };
 
-// Helper to follow redirects from standard endpoints (like /web-vod/api/get)
-function getFinalRedirect(url) {
-    return fetch(url, {
-        method: 'GET',
-        headers: DEFAULT_HEADERS,
-        redirect: 'follow'
-    })
-    .then(function(res) { return res.url; })
-    .catch(function() { return url; });
-}
-
-// 1. Fallback Flow: Legacy links
-function handleLegacyLinksFlow(ohaId) {
-    var linksUrl = BASE_URL + '/web-vod/api/links?id=' + ohaId;
-
-    return fetch(linksUrl, { headers: DEFAULT_HEADERS })
-        .then(function(res) { return res.json(); })
-        .then(function(links) {
-            if (!Array.isArray(links) || links.length === 0) return [];
-
-            var promises = links.map(function(link) {
-                if (!link.url) return Promise.resolve(null);
-
-                var streamApiUrl = BASE_URL + '/web-vod/api/get?link=' + encodeURIComponent(link.url);
-
-                return getFinalRedirect(streamApiUrl)
-                    .then(function(finalUrl) {
-                        var language = link.language || 'de';
-                        return {
-                            url: finalUrl,
-                            meta: {
-                                countryCodes: language === 'de' ? ['de'] : [],
-                                referer: BASE_URL,
-                                title: link.name + ' [' + language.toUpperCase() + ']',
-                                sourceLabel: 'Oha.to'
-                            }
-                        };
-                    })
-                    .catch(function() { return null; });
-            });
-
-            return Promise.all(promises);
-        })
-        .then(function(results) {
-            return results.filter(function(item) { return item !== null; });
-        })
-        .catch(function() { return []; });
-}
-
-// 2. Main Stream Flow: Passing payloads through the Oha.to Lokke Processing Engine
-function handleLokkeFlow(movieData) {
-    var lokkePayload = {
+// Reusable Lokke configurations payload matching target signatures
+function getLokkeHandshakePayload() {
+    return {
         token: 'VKm7XwPbumwb9aeGoVi1fHa6ut1v41a5s6t-yzVQ4qZfN-VwHrdLcD18xPpL4qdzY92xAJiWD_7UZshSngIn_GTbU1uPRTuGFqYQCOBkXzu9YOUPV-u-EbB1WaSZjd6srGhQ',
         reason: 'app-blur',
         locale: 'de',
@@ -91,14 +43,131 @@ function handleLokkeFlow(movieData) {
         proxy: { supported: ['openvpn'], engine: 'openvpn', enabled: false, autoServer: true, id: 'fi-hel' },
         iap: { supported: true, error: 'No in-app payment subscriptions found' }
     };
+}
 
+// Intercepts and parses target links using the internal signature backend resolver endpoint
+function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
     return fetch(LOKKE_PING_URL, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'User-Agent': 'Lokke/1.0.2 (iPhone; CPU iPhone OS 18_7_7 like Mac OS X)'
         },
-        body: JSON.stringify(lokkePayload)
+        body: JSON.stringify(getLokkeHandshakePayload())
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(lokkeData) {
+        var signature = lokkeData && lokkeData.addonSig;
+        if (!signature) throw new Error('OhaTo: Signature acquisition failed');
+
+        var ohaInputPayload = {
+            language: itemLanguage || 'de',
+            region: 'CH',
+            url: targetHostUrl,
+            clientVersion: '3.0.2'
+        };
+
+        return fetch(OHA_RESOLVE_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Accept': '*/*',
+                'User-Agent': 'MediaUrl/2',
+                'Accept-Language': 'de-DE,de;q=0.9',
+                'mediaurl-signature': signature
+            },
+            body: JSON.stringify(ohaInputPayload)
+        });
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(ohaResult) {
+        // Fall back to original url if endpoint resolution returned blank parameters
+        if (!ohaResult) return targetHostUrl;
+        
+        // Extract raw streaming links if packed inside nested properties arrays or components
+        var resolvedUrl = ohaResult.url || ohaResult.file || ohaResult.stream || 
+                          (ohaResult.streams && ohaResult.streams[0] && ohaResult.streams[0].url) || 
+                          (ohaResult.links && ohaResult.links[0]) || targetHostUrl;
+        return resolvedUrl;
+    })
+    .catch(function() {
+        return targetHostUrl;
+    });
+}
+
+function getFinalRedirect(url) {
+    return fetch(url, {
+        method: 'GET',
+        headers: DEFAULT_HEADERS,
+        redirect: 'follow'
+    })
+    .then(function(res) { return res.url; })
+    .catch(function() { return url; });
+}
+
+// 1. Fallback Flow: Legacy URL listings processing
+function handleLegacyLinksFlow(ohaId) {
+    var linksUrl = BASE_URL + '/web-vod/api/links?id=' + ohaId;
+
+    return fetch(linksUrl, { headers: DEFAULT_HEADERS })
+        .then(function(res) { return res.json(); })
+        .then(function(links) {
+            if (!Array.isArray(links) || links.length === 0) return [];
+
+            var promises = links.map(function(link) {
+                if (!link.url) return Promise.resolve(null);
+
+                var streamApiUrl = BASE_URL + '/web-vod/api/get?link=' + encodeURIComponent(link.url);
+
+                return getFinalRedirect(streamApiUrl)
+                    .then(function(finalUrl) {
+                        var language = link.language || 'de';
+
+                        // Check if the link points to a landing page provider (like Doodstream)
+                        if (finalUrl.indexOf('dood') !== -1 || finalUrl.indexOf('/w/') !== -1) {
+                            return resolveDirectMediaUrl(finalUrl, language).then(function(directUrl) {
+                                return {
+                                    url: directUrl,
+                                    meta: {
+                                        countryCodes: language === 'de' ? ['de'] : [],
+                                        referer: BASE_URL,
+                                        title: link.name + ' [DIRECT]',
+                                        sourceLabel: 'Oha.to'
+                                    }
+                                };
+                            });
+                        }
+
+                        return {
+                            url: finalUrl,
+                            meta: {
+                                countryCodes: language === 'de' ? ['de'] : [],
+                                referer: BASE_URL,
+                                title: link.name + ' [' + language.toUpperCase() + ']',
+                                sourceLabel: 'Oha.to'
+                            }
+                        };
+                    })
+                    .catch(function() { return null; });
+            });
+
+            return Promise.all(promises);
+        })
+        .then(function(results) {
+            return results.filter(function(item) { return item !== null; });
+        })
+        .catch(function() { return []; });
+}
+
+// 2. Main Stream Flow: Lokke Platform Extraction Engine
+function handleLokkeFlow(movieData) {
+    return fetch(LOKKE_PING_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Lokke/1.0.2 (iPhone; CPU iPhone OS 18_7_7 like Mac OS X)'
+        },
+        body: JSON.stringify(getLokkeHandshakePayload())
     })
     .then(function(res) { return res.json(); })
     .then(function(lokkeResp) {
@@ -123,14 +192,12 @@ function handleLokkeFlow(movieData) {
             clientVersion: movieData.clientVersion
         };
 
-        // STEP 1: Handshake the data to the Oha Item Server
         return fetch(OHA_ITEM_URL, {
             method: 'POST',
             headers: ohaHeaders,
             body: JSON.stringify(itemPayload)
         })
         .then(function() {
-            // STEP 2: Request processed streams straight back from the Oha Source server
             return fetch(OHA_SOURCE_URL, {
                 method: 'POST',
                 headers: ohaHeaders,
@@ -139,18 +206,32 @@ function handleLokkeFlow(movieData) {
         })
         .then(function(res) { return res.json(); })
         .then(function(finalData) {
-            var out = [];
             var candidates = Array.isArray(finalData) 
                 ? finalData 
                 : (finalData.streams || finalData.sources || finalData.items || []);
 
-            for (var i = 0; i < candidates.length; i++) {
-                var s = candidates[i];
+            var streamPromises = candidates.map(function(s) {
                 var urlStr = s && (s.url || s.file || s.source || s.stream);
-                if (!urlStr) continue;
+                if (!urlStr) return Promise.resolve(null);
 
                 var language = s.language || s.lang || movieData.language || 'de';
-                out.push({
+
+                // Intercept any stream landing links matching external host parameters
+                if (urlStr.indexOf('dood') !== -1 || urlStr.indexOf('/w/') !== -1) {
+                    return resolveDirectMediaUrl(urlStr, language).then(function(directUrl) {
+                        return {
+                            url: directUrl,
+                            meta: {
+                                countryCodes: language === 'de' ? ['de'] : [],
+                                referer: BASE_URL,
+                                title: (s.name || s.title || movieData.name) + ' [DIRECT]',
+                                sourceLabel: 'Oha.to'
+                            }
+                        };
+                    });
+                }
+
+                return Promise.resolve({
                     url: urlStr,
                     meta: {
                         countryCodes: language === 'de' ? ['de'] : [],
@@ -159,8 +240,12 @@ function handleLokkeFlow(movieData) {
                         sourceLabel: 'Oha.to'
                     }
                 });
-            }
-            return out;
+            });
+
+            return Promise.all(streamPromises);
+        })
+        .then(function(resolvedStreams) {
+            return resolvedStreams.filter(function(item) { return item !== null; });
         });
     })
     .catch(function() { return []; });
