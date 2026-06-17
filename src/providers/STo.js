@@ -6,8 +6,10 @@ var TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 var DEFAULT_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'de-DE,de;q=0.9'
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache'
 };
 
 function extractDomain(url) {
@@ -19,46 +21,71 @@ function extractDomain(url) {
 }
 
 /**
- * Inspects S.to's gateway payload to find the true destination URL via Headers or HTML text
+ * Step-by-step redirect hunter that grabs the unique token-path location 
+ * before external tracking networks trigger security walls.
  */
 async function resolveGatewayRedirect(playPath, hosterName) {
     if (!playPath) return null;
     var targetUrl = playPath.startsWith('http') ? playPath : BASE_URL + playPath;
 
     try {
-        // Let fetch follow standard behavior so we capture HTML meta/JS redirects natively
-        var response = await fetch(targetUrl, {
+        // Step 1: Request the S.to gateway wrapper using manual redirection flags
+        var firstHop = await fetch(targetUrl, {
             method: 'GET',
-            headers: DEFAULT_HEADERS
+            headers: {
+                ...DEFAULT_HEADERS,
+                'Referer': targetUrl
+            },
+            redirect: 'manual'
         });
 
-        // 1. Check if the final URL changed during the trip
-        if (response.url && !response.url.includes('s.to/r?t=')) {
-            return response.url;
-        }
-
-        var htmlText = await response.text();
-
-        // 2. Scan the body for common patterns like window.location or url= properties
-        var urlRegex = /(https?:\/\/[^\s"'`<>]+)/gi;
-        var matches = htmlText.match(urlRegex) || [];
-
-        for (var rawUrl of matches) {
-            // Filter out internal assets, S.to links, or tracking domains
-            if (!rawUrl.includes('s.to') && !rawUrl.includes('google') && !rawUrl.includes('w3.org')) {
-                // Strip trailing layout elements if the regex grabbed extra text
-                return rawUrl.replace(/[;}"')]/g, '').trim();
+        // Step 2: Extract the raw location header target if served instantly
+        var location = firstHop.headers.get('location');
+        
+        // Step 3: If S.to delivers an intermediary HTML countdown/meta script, scan the body
+        if (!location) {
+            var html = await firstHop.text();
+            
+            // Extract using explicit wrapper assignments
+            var metaMatch = html.match(/meta\s+http-equiv=["']refresh["']\s+content=["']\d+;\s*url=([^"']+)["']/i);
+            if (metaMatch && metaMatch[1]) {
+                location = metaMatch[1];
+            } else {
+                var scriptMatch = html.match(/window\.location\.href\s*=\s*["']([^"']+)["']/i);
+                if (scriptMatch && scriptMatch[1]) location = scriptMatch[1];
             }
         }
+
+        // Step 4: Follow the deep link directly to grab its routing variables
+        if (location) {
+            var finalDestination = location.startsWith('http') ? location : BASE_URL + location;
+            
+            // Clean common artifact escapes from string extractions
+            finalDestination = finalDestination.replace(/&amp;/g, '&').trim();
+
+            var secondHop = await fetch(finalDestination, {
+                method: 'GET',
+                headers: {
+                    ...DEFAULT_HEADERS,
+                    'Referer': BASE_URL + '/'
+                },
+                redirect: 'manual'
+            });
+
+            var finalLocation = secondHop.headers.get('location') || secondHop.url;
+            if (finalLocation && finalLocation !== finalDestination) {
+                return finalLocation;
+            }
+            return finalDestination;
+        }
     } catch (e) {
-        // Fallback catch-all if execution times out
+        // Graceful fallback logging
     }
 
-    // Hard-coded fallback layout structure
+    // Structural recovery string if endpoints timeout
     var nameLower = hosterName.toLowerCase();
     if (nameLower.includes('voe')) return 'https://voe.sx';
     if (nameLower.includes('dood')) return 'https://dood.yt';
-    if (nameLower.includes('streamtape')) return 'https://streamtape.com';
     return targetUrl;
 }
 
@@ -106,7 +133,7 @@ async function getStreams(tmdbId, type, season, episode) {
             var hosterName = $ep(el).attr('data-provider-name') || $ep(el).find('h4').text().trim() || 'Hoster';
             var playPath = $ep(el).attr('data-play-url') || '';
             
-            // Resolve the gateway parameter to extract the real long URL path
+            // Intercept and parse the full redirect path manually
             var finalHosterUrl = await resolveGatewayRedirect(playPath, hosterName);
 
             if (finalHosterUrl) {
