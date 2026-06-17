@@ -154,24 +154,26 @@ async function getStreams(tmdbId, type, season, episode) {
             var hosterName = $ep(el).attr('data-provider-name') || $ep(el).find('h4').text().trim() || 'Hoster';
             var playPath = $ep(el).attr('data-play-url') || '';
             
-            // Reconstruct mirror destinations bypassing gates using Oha token resolution patterns
+            // Reconstruct the raw internal redirect gateway link
+            var intermediateUrl = BASE_URL + playPath;
             var finalHosterUrl = '';
-            if (hosterName.toLowerCase().includes('voe')) {
-                finalHosterUrl = 'https://voe.sx'; 
-            } else if (hosterName.toLowerCase().includes('dood')) {
-                finalHosterUrl = 'https://dood.yt';
+
+            // Check if S.to left a direct target attribute visible on the element
+            var altLink = $ep(el).attr('data-link-target') || $ep(el).attr('href');
+            if (altLink && !altLink.includes('s.to/r')) {
+                finalHosterUrl = altLink;
             } else {
-                // Read link tokens inside attributes safely
-                var altLink = $ep(el).attr('data-link-target') || $ep(el).attr('href');
-                if (altLink && !altLink.includes('s.to/r')) finalHosterUrl = altLink;
+                // If the link is masked behind /r?t=, we pass the gateway link directly to Oha.
+                // Oha has an internal handler capable of resolving S.to's link format natively when signatures match.
+                finalHosterUrl = intermediateUrl;
             }
 
             if (finalHosterUrl) {
-                console.log(`[S.TO] Reconstructed target link directly: ${finalHosterUrl}`);
+                console.log(`[S.TO] Passing link wrapper directly: ${finalHosterUrl}`);
                 var resolution = await resolveDirectMediaUrl(finalHosterUrl, 'de');
                 var hostDomain = extractDomain(resolution.url);
 
-                var streamHeaders = { 'User-Agent': 'MediaUrl/2', 'Referer': finalHosterUrl + '/' };
+                var streamHeaders = { 'User-Agent': 'MediaUrl/2', 'Referer': BASE_URL + '/' };
                 if (resolution.signature) {
                     streamHeaders['mediaurl-signature'] = resolution.signature;
                 }
