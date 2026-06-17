@@ -19,7 +19,6 @@ function normalizeDoodUrl(url) {
     if (!url || typeof url !== 'string') return url;
     if (url.indexOf('dood') === -1) return url;
     
-    // Captures the unique ID following any /d/, /e/, or /w/ variants
     var match = url.match(/\/[dew]\/([a-zA-Z0-9]+)/);
     if (match && match[1]) {
         return 'https://dood.yt/w/' + match[1];
@@ -34,7 +33,13 @@ function getLokkeHandshakePayload() {
         locale: 'de',
         theme: 'dark',
         metadata: {
-            device: { type: 'Handset', brand: 'Apple', model: 'iPhone 12 Pro', name: 'iPhone', uniqueId: '433C3F78-A264-4096-AF20-28BFF3AB4474' },
+            device: { 
+                type: 'Handset', 
+                brand: 'Apple', 
+                model: 'iPhone 15 Pro', 
+                name: 'iPhone', 
+                uniqueId: 'E9B56A1F-810A-4C23-9D22-C8542FBB0D1C' 
+            },
             os: { name: 'ios', version: '18.7.7', abis: ['ARM64E'], host: 'unknown' },
             app: { platform: 'ios', version: '1.0.2', buildId: '1.0.2', engine: 'jsc', installer: 'TestFlight' },
             version: { package: 'app.lokke.main', binary: '1.0.2', js: '1.0.4' },
@@ -132,7 +137,6 @@ function handleLegacyLinksFlow(ohaId) {
 
                 return getFinalRedirect(streamApiUrl)
                     .then(function(finalUrl) {
-                        // Extract language safely from incoming schema
                         var language = 'de';
                         if (link.languages && link.languages[0]) {
                             language = link.languages[0];
@@ -140,7 +144,6 @@ function handleLegacyLinksFlow(ohaId) {
                             language = link.language;
                         }
 
-                        // Check if it's a Dood host or standardized variant link structure
                         if (finalUrl.indexOf('dood') !== -1 || finalUrl.indexOf('/w/') !== -1) {
                             return resolveDirectMediaUrl(finalUrl, language).then(function(directUrl) {
                                 return {
@@ -230,7 +233,6 @@ function handleLokkeFlow(movieData) {
                 var urlStr = s && (s.url || s.file || s.source || s.stream);
                 if (!urlStr) return Promise.resolve(null);
 
-                // Read language tag securely from the stream item
                 var language = 'de';
                 if (s.languages && s.languages[0]) {
                     language = s.languages[0];
