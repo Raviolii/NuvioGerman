@@ -164,11 +164,11 @@ function handleLegacyLinksFlow(ohaId) {
 
                             return resolveDirectMediaUrl(normalizedUrl, language).then(function(directUrl) {
                                 return {
-                                    name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + hostDomain,
+                                    name: language.toUpperCase() + ' - ' + qualityTag,
                                     title: '',
                                     url: directUrl,
                                     quality: qualityTag,
-                                    size: 'Unknown',
+                                    size: hostDomain,
                                     headers: {
                                         'User-Agent': 'MediaUrl/2',
                                         'Referer': 'https://dood.li/'
@@ -180,11 +180,11 @@ function handleLegacyLinksFlow(ohaId) {
 
                         var standardDomain = extractDomain(finalUrl);
                         return {
-                            name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + standardDomain,
+                            name: language.toUpperCase() + ' - ' + qualityTag,
                             title: '',
                             url: finalUrl,
                             quality: qualityTag,
-                            size: 'Unknown',
+                            size: standardDomain,
                             headers: {
                                 'User-Agent': 'MediaUrl/2',
                                 'Referer': BASE_URL + '/'
@@ -274,11 +274,11 @@ function handleLokkeFlow(movieData) {
 
                     return resolveDirectMediaUrl(normalizedDood, language).then(function(directUrl) {
                         return {
-                            name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + doodDomain,
+                            name: language.toUpperCase() + ' - ' + qualityTag,
                             title: '',
                             url: directUrl,
                             quality: qualityTag,
-                            size: s.size || 'Unknown',
+                            size: doodDomain,
                             headers: {
                                 'User-Agent': 'MediaUrl/2',
                                 'Referer': 'https://dood.li/'
@@ -290,11 +290,11 @@ function handleLokkeFlow(movieData) {
 
                 var targetDomain = extractDomain(urlStr);
                 return Promise.resolve({
-                    name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + targetDomain,
+                    name: language.toUpperCase() + ' - ' + qualityTag,
                     title: '',
                     url: urlStr,
                     quality: qualityTag,
-                    size: s.size || 'Unknown',
+                    size: targetDomain,
                     headers: {
                         'User-Agent': 'MediaUrl/2',
                         'Referer': BASE_URL + '/'
