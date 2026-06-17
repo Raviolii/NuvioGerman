@@ -15,10 +15,10 @@ async function runTest(label, provider, id, type, season, episode) {
         if (streams && streams.length > 0) {
             console.log(`✅ SUCCESS! ${label} found ${streams.length} streams:`);
             streams.forEach((s, i) => {
-                // Safeguard property extraction so it never crashes on undefined 'meta'
+                // Safeguard property extraction so it handles flat properties or meta objects cleanly
                 const displayTitle = s.title || (s.meta && s.meta.title) || s.name || 'Unknown Hoster';
                 console.log(`  [${i + 1}] ${displayTitle}`);
-                console.log(`      URL: ${s.url}`);
+                console.log(`      URL: ${s.url || 'No URL available'}`);
             });
         } else {
             console.log(`❌ No streams found for ${label}. Check the ID, Type (Movie vs Series), or Site Status.`);
@@ -38,7 +38,6 @@ async function start() {
     // ==========================================
     // 2. Test S.to (Series)
     // ID: 76479 (The Boys - TMDB ID)
-    // Note: The S.to script converts this to IMDb internally
     // ==========================================
     const theBoysTmdbId = "76479"; 
     await runTest("S.to", sto, theBoysTmdbId, "series", 1, 1);
