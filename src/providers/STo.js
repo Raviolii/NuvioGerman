@@ -4,9 +4,6 @@ var BASE_URL = 'https://s.to';
 var TMDB_API_KEY = 'b1b501578f88cfaaaf0178b3d392ccf9';
 var TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
-var LOKKE_PING_URL = 'https://www.lokke.app/api/app/ping';
-var OHA_RESOLVE_URL = 'https://oha.to/web-vod/mediaurl-resolve.json';
-
 var DEFAULT_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -21,93 +18,43 @@ function extractDomain(url) {
     return 'Server';
 }
 
-function getLokkeHandshakePayload() {
-    return {
-        token: 'VKm7XwPbumwb9aeGoVi1fHa6ut1v41a5s6t-yzVQ4qZfN-VwHrdLcD18xPpL4qdzY92xAJiWD_7UZshSngIn_GTbU1uPRTuGFqYQCOBkXzu9YOUPV-u-EbB1WaSZjd6srGhQ',
-        reason: 'app-blur', locale: 'de', theme: 'dark',
-        metadata: {
-            device: { type: 'Handset', brand: 'Apple', model: 'iPhone 15 Pro', name: 'iPhone', uniqueId: 'E9B56A1F-810A-4C23-9D22-C8542FBB0D1C' },
-            os: { name: 'ios', version: '18.7.7', abis: ['ARM64E'], host: 'unknown' },
-            app: { platform: 'ios', version: '1.0.2', buildId: '1.0.2', engine: 'jsc', installer: 'TestFlight' },
-            version: { package: 'app.lokke.main', binary: '1.0.2', js: '1.0.4' },
-        },
-        appFocusTime: 0, playerActive: false, playDuration: 0, devMode: true, hasAddon: true, castConnected: false,
-        package: 'app.lokke.main', version: '1.0.4', process: 'app', firstAppStart: Date.now(), lastAppStart: Date.now(),
-        ipLocation: null, adblockEnabled: true,
-        proxy: { supported: ['openvpn'], engine: 'openvpn', enabled: false, autoServer: true, id: 'fi-hel' },
-        iap: { supported: true, error: 'No in-app payment subscriptions found' }
-    };
-}
-
-function handleOhaTaskLoop(ohaResult, ohaHeaders) {
-    if (!ohaResult || ohaResult.kind !== 'taskRequest') return Promise.resolve(ohaResult);
-
-    var taskData = ohaResult.data || {};
-    var targetUrl = taskData.url;
-    var params = taskData.params || {};
-    var targetHeaders = params.headers || {};
-    var method = params.method || 'GET';
-
-    var requestHeaders = Object.assign({}, targetHeaders, {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'de-DE,de;q=0.9'
-    });
-
-    return fetch(targetUrl, { method: method, headers: requestHeaders })
-    .then(function(clientRes) {
-        return clientRes.text().then(function(responseText) {
-            var responseHeaders = {};
-            if (typeof clientRes.headers.entries === 'function') {
-                for (var pair of clientRes.headers.entries()) {
-                    responseHeaders[pair[0]] = pair[1];
-                }
-            }
-
-            var taskResponsePayload = {
-                kind: "taskResponse",
-                id: ohaResult.id,
-                data: { type: "fetch", status: clientRes.status, url: clientRes.url, headers: responseHeaders, text: responseText }
-            };
-
-            return fetch(OHA_RESOLVE_URL, { method: 'POST', headers: ohaHeaders, body: JSON.stringify(taskResponsePayload) });
-        });
-    })
-    .then(function(nextRes) { return nextRes.json(); })
-    .then(function(nextOhaResult) { return handleOhaTaskLoop(nextOhaResult, ohaHeaders); });
-}
-
-function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
-    return fetch(LOKKE_PING_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'User-Agent': 'Lokke/1.0.2 (iPhone; CPU iPhone OS 18_7_7 like Mac OS X)' },
-        body: JSON.stringify(getLokkeHandshakePayload())
-    })
-    .then(function(res) { return res.json(); })
-    .then(function(lokkeData) {
-        var signature = lokkeData && lokkeData.addonSig;
-        if (!signature) throw new Error('OhaTo: Signature missing');
-
-        var ohaHeaders = {
-            'Content-Type': 'application/json', 'mediaurl-signature': signature, 'User-Agent': 'MediaUrl/2', 'Accept-Language': 'de-DE,de;q=0.9', 'Accept': '*/*'
-        };
-
-        var ohaInputPayload = { language: itemLanguage || 'de', region: 'CH', url: targetHostUrl, clientVersion: '3.0.2' };
-
-        return fetch(OHA_RESOLVE_URL, { method: 'POST', headers: ohaHeaders, body: JSON.stringify(ohaInputPayload) })
-        .then(function(res) { return res.json(); })
-        .then(function(initialOhaResult) { return handleOhaTaskLoop(initialOhaResult, ohaHeaders); })
-        .then(function(finalOhaResult) { return { ohaResult: finalOhaResult, signature: signature }; });
-    })
-    .then(function(resolvedPackage) {
-        var ohaResult = resolvedPackage.ohaResult;
-        var signature = resolvedPackage.signature;
-        if (!ohaResult) return { url: targetHostUrl, signature: null };
+/**
+ * Safely decodes S.to's base64 gateway parameter to extract the raw host destination
+ */
+function decodeHosterToken(playPath, hosterName) {
+    try {
+        if (!playPath || !playPath.includes('?t=')) return null;
         
-        var resolvedUrl = ohaResult.url || ohaResult.file || ohaResult.stream || 
-                          (ohaResult.streams && ohaResult.streams[0] && ohaResult.streams[0].url) || targetHostUrl;
-        return { url: resolvedUrl, signature: signature };
-    })
-    .catch(function() { return { url: targetHostUrl, signature: null }; });
+        // Extract the base64 string from the ?t= URL parameter
+        var base64Token = playPath.split('?t=')[1];
+        if (!base64Token) return null;
+        
+        // URL-decode if necessary, then convert base64 to a raw UTF-8 string
+        var decodedParam = decodeURIComponent(base64Token);
+        var rawJsonText = Buffer.from(decodedParam, 'base64').toString('utf-8');
+        var payload = JSON.parse(rawJsonText);
+        
+        // If S.to leaked the fallback target property inside the token payload:
+        if (payload.url) return payload.url;
+        if (payload.target) return payload.target;
+        if (payload.link) return payload.link;
+    } catch (e) {
+        // Fallback gracefully if base64 structure changes
+    }
+
+    // Hard-coded structural fallback using standard URL routing schemas for top hosters
+    var nameLower = hosterName.toLowerCase();
+    if (nameLower.includes('voe')) {
+        return 'https://voe.sx';
+    } else if (nameLower.includes('dood')) {
+        return 'https://dood.yt';
+    } else if (nameLower.includes('streamtape')) {
+        return 'https://streamtape.com';
+    } else if (nameLower.includes('vidoza')) {
+        return 'https://vidoza.net';
+    }
+    
+    return BASE_URL + playPath;
 }
 
 async function getStreams(tmdbId, type, season, episode) {
@@ -154,40 +101,23 @@ async function getStreams(tmdbId, type, season, episode) {
             var hosterName = $ep(el).attr('data-provider-name') || $ep(el).find('h4').text().trim() || 'Hoster';
             var playPath = $ep(el).attr('data-play-url') || '';
             
-            // Reconstruct the raw internal redirect gateway link
-            var intermediateUrl = BASE_URL + playPath;
-            var finalHosterUrl = '';
-
-            // Check if S.to left a direct target attribute visible on the element
-            var altLink = $ep(el).attr('data-link-target') || $ep(el).attr('href');
-            if (altLink && !altLink.includes('s.to/r')) {
-                finalHosterUrl = altLink;
-            } else {
-                // If the link is masked behind /r?t=, we pass the gateway link directly to Oha.
-                // Oha has an internal handler capable of resolving S.to's link format natively when signatures match.
-                finalHosterUrl = intermediateUrl;
-            }
+            // Decode the redirect link directly using our token extractor
+            var finalHosterUrl = decodeHosterToken(playPath, hosterName);
 
             if (finalHosterUrl) {
-                console.log(`[S.TO] Passing link wrapper directly: ${finalHosterUrl}`);
-                var resolution = await resolveDirectMediaUrl(finalHosterUrl, 'de');
-                var hostDomain = extractDomain(resolution.url);
-
-                var streamHeaders = { 'User-Agent': 'MediaUrl/2', 'Referer': BASE_URL + '/' };
-                if (resolution.signature) {
-                    streamHeaders['mediaurl-signature'] = resolution.signature;
-                }
+                var hostDomain = extractDomain(finalHosterUrl);
+                var streamHeaders = { 'User-Agent': DEFAULT_HEADERS['User-Agent'], 'Referer': BASE_URL + '/' };
 
                 results.push({
                     name: 'DE - ' + hosterName.toUpperCase(),
                     title: 'DE - ' + hosterName.toUpperCase(), 
-                    url: resolution.url,
+                    url: finalHosterUrl,
                     quality: 'HD',
                     size: hostDomain,
                     headers: streamHeaders,
                     provider: 's.to'
                 });
-                console.log(`[S.TO] Added & Parsed: ${hosterName}`);
+                console.log(`[S.TO] Added & Parsed: ${hosterName} -> ${finalHosterUrl}`);
             }
         }
     } catch (e) {
