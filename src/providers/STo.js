@@ -16,7 +16,6 @@ var DEFAULT_HEADERS = {
     'Cache-Control': 'max-age=0'
 };
 
-// Halts execution thread to prevent rate-limit flag trips
 var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function extractDomain(url) {
@@ -28,15 +27,15 @@ function extractDomain(url) {
 }
 
 /**
- * Resolves redirectional link wrappers using randomized timing cushions
+ * Resolves redirectional links securely by following structural locations
  */
 async function resolveGatewayRedirect(playPath, hosterName) {
     if (!playPath) return null;
     var targetUrl = playPath.startsWith('http') ? playPath : BASE_URL + playPath;
 
     try {
-        // Enforce a variable pacing delay to prevent simultaneous backend request bursts
-        await sleep(500 + Math.random() * 400);
+        // Humanized thread pacing interval
+        await sleep(600 + Math.random() * 400);
 
         var firstHop = await fetch(targetUrl, {
             method: 'GET',
@@ -49,7 +48,7 @@ async function resolveGatewayRedirect(playPath, hosterName) {
 
         var location = firstHop.headers.get('location');
         
-        // Handle alternative embedded document properties
+        // Secondary pattern matching fallback for meta refreshes
         if (!location) {
             var html = await firstHop.text();
             var metaMatch = html.match(/meta\s+http-equiv=["']refresh["']\s+content=["']\d+;\s*url=([^"']+)["']/i);
@@ -65,9 +64,9 @@ async function resolveGatewayRedirect(playPath, hosterName) {
             var finalDestination = location.startsWith('http') ? location : BASE_URL + location;
             finalDestination = finalDestination.replace(/&amp;/g, '&').trim();
 
-            // Intercept recursive gateway checks if needed
-            if (finalDestination.includes('s.to/r?t=')) {
-                await sleep(300);
+            // Intercept downstream tracking buffers
+            if (finalDestination.includes('s.to/r?t=') || finalDestination.includes('/r?t=')) {
+                await sleep(400);
                 var intermediateHop = await fetch(finalDestination, {
                     method: 'GET',
                     headers: { ...DEFAULT_HEADERS, 'Referer': targetUrl },
@@ -80,10 +79,10 @@ async function resolveGatewayRedirect(playPath, hosterName) {
             return finalDestination;
         }
     } catch (e) {
-        // Graceful error isolation
+        // Isolated exception boundary
     }
 
-    // Mirror current recovery structure for empty responses
+    // Default static fallback structural handler
     var nameLower = hosterName.toLowerCase();
     if (nameLower.includes('voe')) return 'https://voe.sx';
     if (nameLower.includes('dood')) return 'https://dood.yt';
@@ -127,14 +126,29 @@ async function getStreams(tmdbId, type, season, episode) {
         var epHtml = await epRes.text();
         var $ep = cheerio.load(epHtml);
 
+        // Targeted link extraction elements
         var linkBoxes = $ep('button.link-box[data-language-id="1"]').toArray();
         console.log(`[S.TO] Found ${linkBoxes.length} potential German streams.`);
         
-        // Iterates sequentially over host entries to ensure timing cushions work correctly
         for (var el of linkBoxes) {
-            var hosterName = $ep(el).attr('data-provider-name') || $ep(el).find('h4').text().trim() || 'Hoster';
-            var playPath = $ep(el).attr('data-play-url') || '';
+            var $el = $ep(el);
+            var hosterName = $el.attr('data-provider-name') || $el.find('h4').text().trim() || 'Hoster';
             
+            // Comprehensive path parsing cascade
+            var playPath = $el.attr('data-play-url') || 
+                           $el.attr('data-url') || 
+                           $el.attr('href') || '';
+
+            // Backup assembly parsing pattern if attributes are missing
+            if (!playPath) {
+                var linkId = $el.attr('data-link-id') || $el.attr('data-id');
+                if (linkId) {
+                    playPath = `/redirect/link/${linkId}`;
+                }
+            }
+            
+            if (!playPath) continue;
+
             var finalHosterUrl = await resolveGatewayRedirect(playPath, hosterName);
 
             if (finalHosterUrl) {
