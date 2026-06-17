@@ -14,7 +14,23 @@ var DEFAULT_HEADERS = {
     'Referer': BASE_URL + '/'
 };
 
-// Reusable Lokke configurations payload matching target signatures
+// Normalizes miscellaneous Doodstream domain patterns to the specific https://dood.yt/w/... structure
+function normalizeDoodUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    
+    // Check if it's a Doodstream derivative domain
+    var isDood = url.indexOf('dood') !== -1;
+    if (!isDood) return url;
+    
+    // Pattern to capture the unique alphanumerical ID at the tail end of paths like /d/id, /e/id, or /w/id
+    var match = url.match(/\/[dew]\/([a-zA-Z0-9]+)/);
+    if (match && match[1]) {
+        return 'https://dood.yt/w/' + match[1];
+    }
+    
+    return url;
+}
+
 function getLokkeHandshakePayload() {
     return {
         token: 'VKm7XwPbumwb9aeGoVi1fHa6ut1v41a5s6t-yzVQ4qZfN-VwHrdLcD18xPpL4qdzY92xAJiWD_7UZshSngIn_GTbU1uPRTuGFqYQCOBkXzu9YOUPV-u-EbB1WaSZjd6srGhQ',
@@ -45,8 +61,10 @@ function getLokkeHandshakePayload() {
     };
 }
 
-// Intercepts and parses target links using the internal signature backend resolver endpoint
 function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
+    // Force standardization of the host URL before communicating with the OHA server pipeline
+    var finalTargetUrl = normalizeDoodUrl(targetHostUrl);
+
     return fetch(LOKKE_PING_URL, {
         method: 'POST',
         headers: {
@@ -63,7 +81,7 @@ function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
         var ohaInputPayload = {
             language: itemLanguage || 'de',
             region: 'CH',
-            url: targetHostUrl,
+            url: finalTargetUrl,
             clientVersion: '3.0.2'
         };
 
@@ -81,17 +99,15 @@ function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
     })
     .then(function(res) { return res.json(); })
     .then(function(ohaResult) {
-        // Fall back to original url if endpoint resolution returned blank parameters
-        if (!ohaResult) return targetHostUrl;
+        if (!ohaResult) return finalTargetUrl;
         
-        // Extract raw streaming links if packed inside nested properties arrays or components
         var resolvedUrl = ohaResult.url || ohaResult.file || ohaResult.stream || 
                           (ohaResult.streams && ohaResult.streams[0] && ohaResult.streams[0].url) || 
-                          (ohaResult.links && ohaResult.links[0]) || targetHostUrl;
+                          (ohaResult.links && ohaResult.links[0]) || finalTargetUrl;
         return resolvedUrl;
     })
     .catch(function() {
-        return targetHostUrl;
+        return finalTargetUrl;
     });
 }
 
@@ -105,7 +121,6 @@ function getFinalRedirect(url) {
     .catch(function() { return url; });
 }
 
-// 1. Fallback Flow: Legacy URL listings processing
 function handleLegacyLinksFlow(ohaId) {
     var linksUrl = BASE_URL + '/web-vod/api/links?id=' + ohaId;
 
@@ -123,7 +138,7 @@ function handleLegacyLinksFlow(ohaId) {
                     .then(function(finalUrl) {
                         var language = link.language || 'de';
 
-                        // Check if the link points to a landing page provider (like Doodstream)
+                        // Process and forward to signature validation when matching a dood pattern
                         if (finalUrl.indexOf('dood') !== -1 || finalUrl.indexOf('/w/') !== -1) {
                             return resolveDirectMediaUrl(finalUrl, language).then(function(directUrl) {
                                 return {
@@ -159,7 +174,6 @@ function handleLegacyLinksFlow(ohaId) {
         .catch(function() { return []; });
 }
 
-// 2. Main Stream Flow: Lokke Platform Extraction Engine
 function handleLokkeFlow(movieData) {
     return fetch(LOKKE_PING_URL, {
         method: 'POST',
@@ -216,7 +230,6 @@ function handleLokkeFlow(movieData) {
 
                 var language = s.language || s.lang || movieData.language || 'de';
 
-                // Intercept any stream landing links matching external host parameters
                 if (urlStr.indexOf('dood') !== -1 || urlStr.indexOf('/w/') !== -1) {
                     return resolveDirectMediaUrl(urlStr, language).then(function(directUrl) {
                         return {
