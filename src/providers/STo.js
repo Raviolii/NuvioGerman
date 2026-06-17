@@ -229,21 +229,32 @@ function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
 }
 
 // ==========================================
-// S.TO REDIRECT HELPER
+// S.TO REDIRECT EXTRACTOR
 // ==========================================
 async function getFinalRedirect(url, referer) {
     try {
-        console.log(`[S.TO] Resolving redirect: ${url}`);
+        console.log(`[S.TO] Loading redirect wrapper page: ${url}`);
         const response = await fetch(url, {
             method: 'GET',
-            headers: { ...DEFAULT_HEADERS, 'Referer': referer },
-            redirect: 'follow'
+            headers: { ...DEFAULT_HEADERS, 'Referer': referer }
         });
         
-        // If it's another internal s.to protective page, we grab the final destination URL
+        const html = await response.text();
+        
+        // S.to intermediate gateway pages output the real streaming path inside an anchor tag
+        // e.g., <a href="https://voe.sx/..." class="watchEpisode">
+        const $ = cheerio.load(html);
+        const targetLink = $('a.watchEpisode').attr('href') || $('.redirect-link').attr('href');
+        
+        if (targetLink) {
+            console.log(`[S.TO] Extracted true Hoster URL from gateway: ${targetLink}`);
+            return targetLink;
+        }
+
+        // Fallback to checking location tracking if anchor scraping isn't hit
         return response.url;
     } catch (e) {
-        console.error(`[S.TO] Redirect resolution failed: ${e.message}`);
+        console.error(`[S.TO] Redirect generation tracking failed: ${e.message}`);
         return url;
     }
 }
@@ -309,7 +320,6 @@ async function getStreams(tmdbId, type, season, episode) {
         var epHtml = await epRes.text();
         var $ep = cheerio.load(epHtml);
 
-        // Language IDs: 1 = German
         var linkBoxes = $ep('button.link-box[data-language-id="1"]').toArray();
         console.log(`[S.TO] Found ${linkBoxes.length} potential German streams.`);
         
@@ -320,16 +330,13 @@ async function getStreams(tmdbId, type, season, episode) {
             if (!playPath) continue;
 
             var redirectUrl = BASE_URL + playPath;
-            
-            // First step: follow the internal s.to protective redirect link to get the target host link
             var rawHosterUrl = await getFinalRedirect(redirectUrl, targetUrl);
 
-            // Verify we actually successfully broke out of s.to loop structure
-            if (rawHosterUrl && !rawHosterUrl.includes('s.to/r/')) {
+            if (rawHosterUrl && !rawHosterUrl.includes('s.to/r')) {
                 var cleanUrl = normalizeVoeUrl(normalizeDoodUrl(rawHosterUrl));
                 var hostDomain = extractDomain(cleanUrl);
 
-                console.log(`[S.TO] Passing broken out stream URL to Oha: ${cleanUrl}`);
+                console.log(`[S.TO] Passing true stream URL to Oha: ${cleanUrl}`);
                 var resolution = await resolveDirectMediaUrl(cleanUrl, 'de');
 
                 var streamHeaders = {
@@ -343,7 +350,7 @@ async function getStreams(tmdbId, type, season, episode) {
 
                 results.push({
                     name: 'DE - ' + hosterName.toUpperCase(),
-                    title: '',
+                    title: 'DE - ' + hosterName.toUpperCase(), // Added fallback to satisfy test.js .title checks
                     url: resolution.url,
                     quality: 'HD',
                     size: hostDomain,
