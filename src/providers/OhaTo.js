@@ -145,11 +145,12 @@ function handleLegacyLinksFlow(ohaId, fallbackTitle) {
                         }
 
                         var qualityTag = link.tag || 'HD';
+                        var hostName = link.name && link.name.toLowerCase() !== 'unknown' ? link.name : 'Server';
 
                         if (finalUrl.indexOf('dood') !== -1 || finalUrl.indexOf('/w/') !== -1) {
                             return resolveDirectMediaUrl(finalUrl, language).then(function(directUrl) {
                                 return {
-                                    name: 'Oha.to (' + (link.name || 'Server') + ') - ' + language.toUpperCase(),
+                                    name: 'Oha.to (' + hostName + ') - ' + language.toUpperCase(),
                                     title: fallbackTitle,
                                     url: directUrl,
                                     quality: qualityTag,
@@ -164,7 +165,7 @@ function handleLegacyLinksFlow(ohaId, fallbackTitle) {
                         }
 
                         return {
-                            name: 'Oha.to (' + (link.name || 'Server') + ') - ' + language.toUpperCase(),
+                            name: 'Oha.to (' + hostName + ') - ' + language.toUpperCase(),
                             title: fallbackTitle,
                             url: finalUrl,
                             quality: qualityTag,
@@ -251,6 +252,7 @@ function handleLokkeFlow(movieData) {
                 }
 
                 var qualityTag = s.tag || s.quality || 'HD';
+                
                 var mediaTitle = movieData.name;
                 if (movieData.episode && movieData.episode.season) {
                     mediaTitle += ' S' + movieData.episode.season + 'E' + movieData.episode.episode;
@@ -260,10 +262,15 @@ function handleLokkeFlow(movieData) {
                     if (yearMatch) mediaTitle += ' (' + yearMatch[0] + ')';
                 }
 
+                var hostName = s.name || s.title;
+                if (!hostName || hostName.toLowerCase() === 'unknown') {
+                    hostName = 'Server';
+                }
+
                 if (urlStr.indexOf('dood') !== -1 || urlStr.indexOf('/w/') !== -1) {
                     return resolveDirectMediaUrl(urlStr, language).then(function(directUrl) {
                         return {
-                            name: 'Oha.to (' + (s.name || s.title || 'Server') + ') - ' + language.toUpperCase(),
+                            name: 'Oha.to (' + hostName + ') - ' + language.toUpperCase(),
                             title: mediaTitle,
                             url: directUrl,
                             quality: qualityTag,
@@ -278,7 +285,7 @@ function handleLokkeFlow(movieData) {
                 }
 
                 return Promise.resolve({
-                    name: 'Oha.to (' + (s.name || s.title || 'Server') + ') - ' + language.toUpperCase(),
+                    name: 'Oha.to (' + hostName + ') - ' + language.toUpperCase(),
                     title: mediaTitle,
                     url: urlStr,
                     quality: qualityTag,
