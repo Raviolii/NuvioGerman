@@ -42,6 +42,27 @@
       "contentLanguage": [
         "de"
       ]
+    },
+    {
+      "id": "ohato",
+      "name": "Oha.to",
+      "description": "Oha.to - Deutsche Filme und Serien Streams",
+      "version": "1.0.0",
+      "author": "R4VEolii",
+      "supportedTypes": [
+        "movie",
+        "series"
+      ],
+      "filename": "src/providers/OhaTo.js",
+      "enabled": true,
+      "formats": [
+        "mp4",
+        "m3u8"
+      ],
+      "logo": "https://oha.to/favicon.ico",
+      "contentLanguage": [
+        "de"
+      ]
     }
   ]
 }
