@@ -14,20 +14,16 @@ var DEFAULT_HEADERS = {
     'Referer': BASE_URL + '/'
 };
 
-// Normalizes miscellaneous Doodstream domain patterns to the specific https://dood.yt/w/... structure
+// Standardizes miscellaneous Doodstream variations to the exact https://dood.yt/w/ID format
 function normalizeDoodUrl(url) {
     if (!url || typeof url !== 'string') return url;
+    if (url.indexOf('dood') === -1) return url;
     
-    // Check if it's a Doodstream derivative domain
-    var isDood = url.indexOf('dood') !== -1;
-    if (!isDood) return url;
-    
-    // Pattern to capture the unique alphanumerical ID at the tail end of paths like /d/id, /e/id, or /w/id
+    // Captures the unique ID following any /d/, /e/, or /w/ variants
     var match = url.match(/\/[dew]\/([a-zA-Z0-9]+)/);
     if (match && match[1]) {
         return 'https://dood.yt/w/' + match[1];
     }
-    
     return url;
 }
 
@@ -61,8 +57,8 @@ function getLokkeHandshakePayload() {
     };
 }
 
+// Sends the transformed target URL to the Oha Server backend via the authenticated handshake loop
 function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
-    // Force standardization of the host URL before communicating with the OHA server pipeline
     var finalTargetUrl = normalizeDoodUrl(targetHostUrl);
 
     return fetch(LOKKE_PING_URL, {
@@ -76,7 +72,7 @@ function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
     .then(function(res) { return res.json(); })
     .then(function(lokkeData) {
         var signature = lokkeData && lokkeData.addonSig;
-        if (!signature) throw new Error('OhaTo: Signature acquisition failed');
+        if (!signature) throw new Error('OhaTo: Signature validation failed');
 
         var ohaInputPayload = {
             language: itemLanguage || 'de',
@@ -136,17 +132,23 @@ function handleLegacyLinksFlow(ohaId) {
 
                 return getFinalRedirect(streamApiUrl)
                     .then(function(finalUrl) {
-                        var language = link.language || 'de';
+                        // Extract language safely from incoming schema
+                        var language = 'de';
+                        if (link.languages && link.languages[0]) {
+                            language = link.languages[0];
+                        } else if (link.language) {
+                            language = link.language;
+                        }
 
-                        // Process and forward to signature validation when matching a dood pattern
+                        // Check if it's a Dood host or standardized variant link structure
                         if (finalUrl.indexOf('dood') !== -1 || finalUrl.indexOf('/w/') !== -1) {
                             return resolveDirectMediaUrl(finalUrl, language).then(function(directUrl) {
                                 return {
                                     url: directUrl,
                                     meta: {
-                                        countryCodes: language === 'de' ? ['de'] : [],
+                                        countryCodes: [language],
                                         referer: BASE_URL,
-                                        title: link.name + ' [DIRECT]',
+                                        title: link.name + ' [DIRECT] (' + language.toUpperCase() + ')',
                                         sourceLabel: 'Oha.to'
                                     }
                                 };
@@ -156,7 +158,7 @@ function handleLegacyLinksFlow(ohaId) {
                         return {
                             url: finalUrl,
                             meta: {
-                                countryCodes: language === 'de' ? ['de'] : [],
+                                countryCodes: [language],
                                 referer: BASE_URL,
                                 title: link.name + ' [' + language.toUpperCase() + ']',
                                 sourceLabel: 'Oha.to'
@@ -228,18 +230,26 @@ function handleLokkeFlow(movieData) {
                 var urlStr = s && (s.url || s.file || s.source || s.stream);
                 if (!urlStr) return Promise.resolve(null);
 
-                var language = s.language || s.lang || movieData.language || 'de';
+                // Read language tag securely from the stream item
+                var language = 'de';
+                if (s.languages && s.languages[0]) {
+                    language = s.languages[0];
+                } else if (s.language || s.lang) {
+                    language = s.language || s.lang;
+                } else if (movieData.language) {
+                    language = movieData.language;
+                }
 
                 if (urlStr.indexOf('dood') !== -1 || urlStr.indexOf('/w/') !== -1) {
                     return resolveDirectMediaUrl(urlStr, language).then(function(directUrl) {
                         return {
                             url: directUrl,
                             meta: {
-                                countryCodes: language === 'de' ? ['de'] : [],
+                                countryCodes: [language],
                                 referer: BASE_URL,
-                                title: (s.name || s.title || movieData.name) + ' [DIRECT]',
+                                title: (s.name || s.title || movieData.name) + ' [DIRECT] (' + language.toUpperCase() + ')',
                                 sourceLabel: 'Oha.to'
-                            }
+                              }
                         };
                     });
                 }
@@ -247,9 +257,9 @@ function handleLokkeFlow(movieData) {
                 return Promise.resolve({
                     url: urlStr,
                     meta: {
-                        countryCodes: language === 'de' ? ['de'] : [],
+                        countryCodes: [language],
                         referer: BASE_URL,
-                        title: s.name || s.title || movieData.name,
+                        title: (s.name || s.title || movieData.name) + ' [' + language.toUpperCase() + ']',
                         sourceLabel: 'Oha.to'
                     }
                 });
