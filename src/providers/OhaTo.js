@@ -164,8 +164,8 @@ function handleLegacyLinksFlow(ohaId) {
 
                             return resolveDirectMediaUrl(normalizedUrl, language).then(function(directUrl) {
                                 return {
-                                    name: language.toUpperCase() + ' - ' + qualityTag,
-                                    title: hostDomain,
+                                    name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + hostDomain,
+                                    title: '',
                                     url: directUrl,
                                     quality: qualityTag,
                                     size: 'Unknown',
@@ -180,8 +180,8 @@ function handleLegacyLinksFlow(ohaId) {
 
                         var standardDomain = extractDomain(finalUrl);
                         return {
-                            name: language.toUpperCase() + ' - ' + qualityTag,
-                            title: standardDomain,
+                            name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + standardDomain,
+                            title: '',
                             url: finalUrl,
                             quality: qualityTag,
                             size: 'Unknown',
@@ -274,8 +274,8 @@ function handleLokkeFlow(movieData) {
 
                     return resolveDirectMediaUrl(normalizedDood, language).then(function(directUrl) {
                         return {
-                            name: language.toUpperCase() + ' - ' + qualityTag,
-                            title: doodDomain,
+                            name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + doodDomain,
+                            title: '',
                             url: directUrl,
                             quality: qualityTag,
                             size: s.size || 'Unknown',
@@ -290,8 +290,8 @@ function handleLokkeFlow(movieData) {
 
                 var targetDomain = extractDomain(urlStr);
                 return Promise.resolve({
-                    name: language.toUpperCase() + ' - ' + qualityTag,
-                    title: targetDomain,
+                    name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + targetDomain,
+                    title: '',
                     url: urlStr,
                     quality: qualityTag,
                     size: s.size || 'Unknown',
