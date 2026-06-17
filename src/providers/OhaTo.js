@@ -122,7 +122,7 @@ function getFinalRedirect(url) {
     .catch(function() { return url; });
 }
 
-function handleLegacyLinksFlow(ohaId) {
+function handleLegacyLinksFlow(ohaId, fallbackTitle) {
     var linksUrl = BASE_URL + '/web-vod/api/links?id=' + ohaId;
 
     return fetch(linksUrl, { headers: DEFAULT_HEADERS })
@@ -144,28 +144,36 @@ function handleLegacyLinksFlow(ohaId) {
                             language = link.language;
                         }
 
+                        var qualityTag = link.tag || 'HD';
+
                         if (finalUrl.indexOf('dood') !== -1 || finalUrl.indexOf('/w/') !== -1) {
                             return resolveDirectMediaUrl(finalUrl, language).then(function(directUrl) {
                                 return {
+                                    name: 'Oha.to (' + (link.name || 'Server') + ') - ' + language.toUpperCase(),
+                                    title: fallbackTitle,
                                     url: directUrl,
-                                    meta: {
-                                        countryCodes: [language],
-                                        referer: BASE_URL,
-                                        title: link.name + ' [DIRECT] (' + language.toUpperCase() + ')',
-                                        sourceLabel: 'Oha.to'
-                                    }
+                                    quality: qualityTag,
+                                    size: 'Unknown',
+                                    headers: {
+                                        'User-Agent': 'MediaUrl/2',
+                                        'Referer': 'https://dood.li/'
+                                    },
+                                    provider: 'ohato'
                                 };
                             });
                         }
 
                         return {
+                            name: 'Oha.to (' + (link.name || 'Server') + ') - ' + language.toUpperCase(),
+                            title: fallbackTitle,
                             url: finalUrl,
-                            meta: {
-                                countryCodes: [language],
-                                referer: BASE_URL,
-                                title: link.name + ' [' + language.toUpperCase() + ']',
-                                sourceLabel: 'Oha.to'
-                            }
+                            quality: qualityTag,
+                            size: 'Unknown',
+                            headers: {
+                                'User-Agent': 'MediaUrl/2',
+                                'Referer': BASE_URL + '/'
+                            },
+                            provider: 'ohato'
                         };
                     })
                     .catch(function() { return null; });
@@ -242,28 +250,44 @@ function handleLokkeFlow(movieData) {
                     language = movieData.language;
                 }
 
+                var qualityTag = s.tag || s.quality || 'HD';
+                var mediaTitle = movieData.name;
+                if (movieData.episode && movieData.episode.season) {
+                    mediaTitle += ' S' + movieData.episode.season + 'E' + movieData.episode.episode;
+                }
+                if (movieData.releaseDate) {
+                    var yearMatch = movieData.releaseDate.match(/^\d{4}/);
+                    if (yearMatch) mediaTitle += ' (' + yearMatch[0] + ')';
+                }
+
                 if (urlStr.indexOf('dood') !== -1 || urlStr.indexOf('/w/') !== -1) {
                     return resolveDirectMediaUrl(urlStr, language).then(function(directUrl) {
                         return {
+                            name: 'Oha.to (' + (s.name || s.title || 'Server') + ') - ' + language.toUpperCase(),
+                            title: mediaTitle,
                             url: directUrl,
-                            meta: {
-                                countryCodes: [language],
-                                referer: BASE_URL,
-                                title: (s.name || s.title || movieData.name) + ' [DIRECT] (' + language.toUpperCase() + ')',
-                                sourceLabel: 'Oha.to'
-                              }
+                            quality: qualityTag,
+                            size: s.size || 'Unknown',
+                            headers: {
+                                'User-Agent': 'MediaUrl/2',
+                                'Referer': 'https://dood.li/'
+                            },
+                            provider: 'ohato'
                         };
                     });
                 }
 
                 return Promise.resolve({
+                    name: 'Oha.to (' + (s.name || s.title || 'Server') + ') - ' + language.toUpperCase(),
+                    title: mediaTitle,
                     url: urlStr,
-                    meta: {
-                        countryCodes: [language],
-                        referer: BASE_URL,
-                        title: (s.name || s.title || movieData.name) + ' [' + language.toUpperCase() + ']',
-                        sourceLabel: 'Oha.to'
-                    }
+                    quality: qualityTag,
+                    size: s.size || 'Unknown',
+                    headers: {
+                        'User-Agent': 'MediaUrl/2',
+                        'Referer': BASE_URL + '/'
+                    },
+                    provider: 'ohato'
                 });
             });
 
@@ -287,8 +311,10 @@ function getStreams(tmdbId, type, season, episode) {
             return res.json();
         })
         .then(function(vodData) {
+            var fallbackTitle = (vodData && (vodData.name || vodData.title)) || 'Media Title';
+            
             if (!vodData) {
-                return handleLegacyLinksFlow(ohaId);
+                return handleLegacyLinksFlow(ohaId, fallbackTitle);
             }
 
             var dynamicMovieData = {
@@ -296,21 +322,21 @@ function getStreams(tmdbId, type, season, episode) {
                 region: 'CH',
                 type: isSeries ? 'series' : 'movie',
                 ids: {
-                    tmdb_id: String((vodData && (vodData.tmdb_id || vodData.tmdbId)) || tmdbId),
-                    imdb_id: String((vodData && (vodData.imdb_id || vodData.imdbId)) || '')
+                    tmdb_id: String(vodData.tmdb_id || vodData.tmdbId || tmdbId),
+                    imdb_id: String(vodData.imdb_id || vodData.imdbId || '')
                 },
-                name: (vodData && (vodData.name || vodData.title)) || 'Unbekannter Titel',
-                originalName: vodData ? (vodData.original_name || vodData.originalTitle || vodData.name || vodData.title) : undefined,
-                releaseDate: vodData ? (vodData.release_date || vodData.releaseDate) : undefined,
-                nameTranslations: vodData ? (vodData.nameTranslations || { de: vodData.name || vodData.title }) : { de: 'Unbekannter Titel' },
+                name: fallbackTitle,
+                originalName: vodData.original_name || vodData.originalTitle || vodData.name || vodData.title,
+                releaseDate: vodData.release_date || vodData.releaseDate,
+                nameTranslations: vodData.nameTranslations || { de: vodData.name || vodData.title },
                 episode: isSeries ? {
                     ids: {
                         tmdb_episode_id:
-                            (vodData && vodData.episode && (vodData.episode.tmdb_episode_id || vodData.episode.tmdbEpisodeId)) ||
-                            (vodData && (vodData.tmdb_episode_id || vodData.tmdbEpisodeId)) || undefined
+                            (vodData.episode && (vodData.episode.tmdb_episode_id || vodData.episode.tmdbEpisodeId)) ||
+                            vodData.tmdb_episode_id || vodData.tmdbEpisodeId || undefined
                     },
-                    name: (vodData && vodData.episode && (vodData.episode.name || vodData.episode.title)) || undefined,
-                    releaseDate: (vodData && vodData.episode && (vodData.episode.release_date || vodData.episode.releaseDate)) || undefined,
+                    name: (vodData.episode && (vodData.episode.name || vodData.episode.title)) || undefined,
+                    releaseDate: (vodData.episode && (vodData.episode.release_date || vodData.episode.releaseDate)) || undefined,
                     season: season,
                     episode: episode || 1
                 } : {},
