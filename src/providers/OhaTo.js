@@ -20,7 +20,6 @@ function extractDomain(url) {
     var matches = url.match(/^https?:\/\/([^/?#]+)(?:[/?#]|$)/i);
     var domain = matches && matches[1];
     if (domain) {
-        // Strip out 'www.' subdomains if present
         return domain.replace(/^www\./i, '');
     }
     return 'Server';
@@ -34,6 +33,19 @@ function normalizeDoodUrl(url) {
     var match = url.match(/\/[dew]\/([a-zA-Z0-9]+)/);
     if (match && match[1]) {
         return 'https://dood.yt/w/' + match[1];
+    }
+    return url;
+}
+
+// Ensures Voe streams are normalized to use the base voe.sx domain
+function normalizeVoeUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    if (url.indexOf('voe') === -1) return url;
+
+    // Handles patterns like voe.sx, voe.com, voe-unblock, etc.
+    var match = url.match(/https?:\/\/[^\/]+\/([a-zA-Z0-9]+)/);
+    if (match && match[1]) {
+        return 'https://voe.sx/' + match[1];
     }
     return url;
 }
@@ -74,9 +86,67 @@ function getLokkeHandshakePayload() {
     };
 }
 
+// Executes the recursive Oha Task loop for URLs requiring client-side page fetching (like Voe)
+function handleOhaTaskLoop(ohaResult, ohaHeaders) {
+    if (!ohaResult || ohaResult.kind !== 'taskRequest') {
+        return Promise.resolve(ohaResult);
+    }
+
+    var taskData = ohaResult.data || {};
+    var targetUrl = taskData.url;
+    var params = taskData.params || {};
+    var targetHeaders = params.headers || {};
+    var method = params.method || 'GET';
+
+    // Mix in default client language headers
+    var requestHeaders = Object.assign({}, targetHeaders, {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7'
+    });
+
+    return fetch(targetUrl, {
+        method: method,
+        headers: requestHeaders
+    })
+    .then(function(clientRes) {
+        return clientRes.text().then(function(responseText) {
+            var responseHeaders = {};
+            if (typeof clientRes.headers.entries === 'function') {
+                for (var pair of clientRes.headers.entries()) {
+                    responseHeaders[pair[0]] = pair[1];
+                }
+            }
+
+            var taskResponsePayload = {
+                kind: "taskResponse",
+                id: ohaResult.id,
+                data: {
+                    type: "fetch",
+                    status: clientRes.status,
+                    url: clientRes.url,
+                    headers: responseHeaders,
+                    text: responseText
+                }
+            };
+
+            return fetch(OHA_RESOLVE_URL, {
+                method: 'POST',
+                headers: ohaHeaders,
+                body: JSON.stringify(taskResponsePayload)
+            });
+        });
+    })
+    .then(function(nextRes) { return nextRes.json(); })
+    .then(function(nextOhaResult) {
+        // Recurse if another challenge request comes back
+        return handleOhaTaskLoop(nextOhaResult, ohaHeaders);
+    });
+}
+
 // Sends the transformed target URL to the Oha Server backend via the authenticated handshake loop
 function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
     var finalTargetUrl = normalizeDoodUrl(targetHostUrl);
+    finalTargetUrl = normalizeVoeUrl(finalTargetUrl);
 
     return fetch(LOKKE_PING_URL, {
         method: 'POST',
@@ -91,6 +161,14 @@ function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
         var signature = lokkeData && lokkeData.addonSig;
         if (!signature) throw new Error('OhaTo: Signature validation failed');
 
+        var ohaHeaders = {
+            'Content-Type': 'application/json',
+            'mediaurl-signature': signature,
+            'User-Agent': 'MediaUrl/2',
+            'Accept-Language': 'de-DE,de;q=0.9',
+            'Accept': '*/*'
+        };
+
         var ohaInputPayload = {
             language: itemLanguage || 'de',
             region: 'CH',
@@ -100,17 +178,15 @@ function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
 
         return fetch(OHA_RESOLVE_URL, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json; charset=utf-8',
-                'Accept': '*/*',
-                'User-Agent': 'MediaUrl/2',
-                'Accept-Language': 'de-DE,de;q=0.9',
-                'mediaurl-signature': signature
-            },
+            headers: ohaHeaders,
             body: JSON.stringify(ohaInputPayload)
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(initialOhaResult) {
+            // Process task loop challenges if present (critical for Voe)
+            return handleOhaTaskLoop(initialOhaResult, ohaHeaders);
         });
     })
-    .then(function(res) { return res.json(); })
     .then(function(ohaResult) {
         if (!ohaResult) return finalTargetUrl;
         
@@ -157,40 +233,23 @@ function handleLegacyLinksFlow(ohaId) {
                         }
 
                         var qualityTag = link.tag || 'HD';
+                        var cleanUrl = normalizeVoeUrl(normalizeDoodUrl(finalUrl));
+                        var hostDomain = extractDomain(cleanUrl);
 
-                        if (finalUrl.indexOf('dood') !== -1 || finalUrl.indexOf('/w/') !== -1) {
-                            var normalizedUrl = normalizeDoodUrl(finalUrl);
-                            var hostDomain = extractDomain(normalizedUrl);
-
-                            return resolveDirectMediaUrl(normalizedUrl, language).then(function(directUrl) {
-                                return {
-                                    name: language.toUpperCase() + ' - ' + qualityTag,
-                                    title: '',
-                                    url: directUrl,
-                                    quality: qualityTag,
-                                    size: hostDomain,
-                                    headers: {
-                                        'User-Agent': 'MediaUrl/2',
-                                        'Referer': 'https://dood.li/'
-                                    },
-                                    provider: 'ohato'
-                                };
-                            });
-                        }
-
-                        var standardDomain = extractDomain(finalUrl);
-                        return {
-                            name: language.toUpperCase() + ' - ' + qualityTag,
-                            title: '',
-                            url: finalUrl,
-                            quality: qualityTag,
-                            size: standardDomain,
-                            headers: {
-                                'User-Agent': 'MediaUrl/2',
-                                'Referer': BASE_URL + '/'
-                            },
-                            provider: 'ohato'
-                        };
+                        return resolveDirectMediaUrl(cleanUrl, language).then(function(directUrl) {
+                            return {
+                                name: language.toUpperCase() + ' - ' + qualityTag,
+                                title: '',
+                                url: directUrl,
+                                quality: qualityTag,
+                                size: hostDomain,
+                                headers: {
+                                    'User-Agent': 'MediaUrl/2',
+                                    'Referer': 'https://dood.li/'
+                                },
+                                provider: 'ohato'
+                            };
+                        });
                     })
                     .catch(function() { return null; });
             });
@@ -267,39 +326,22 @@ function handleLokkeFlow(movieData) {
                 }
 
                 var qualityTag = s.tag || s.quality || 'HD';
+                var cleanUrl = normalizeVoeUrl(normalizeDoodUrl(urlStr));
+                var hostDomain = extractDomain(cleanUrl);
 
-                if (urlStr.indexOf('dood') !== -1 || urlStr.indexOf('/w/') !== -1) {
-                    var normalizedDood = normalizeDoodUrl(urlStr);
-                    var doodDomain = extractDomain(normalizedDood);
-
-                    return resolveDirectMediaUrl(normalizedDood, language).then(function(directUrl) {
-                        return {
-                            name: language.toUpperCase() + ' - ' + qualityTag,
-                            title: '',
-                            url: directUrl,
-                            quality: qualityTag,
-                            size: doodDomain,
-                            headers: {
-                                'User-Agent': 'MediaUrl/2',
-                                'Referer': 'https://dood.li/'
-                            },
-                            provider: 'ohato'
-                        };
-                    });
-                }
-
-                var targetDomain = extractDomain(urlStr);
-                return Promise.resolve({
-                    name: language.toUpperCase() + ' - ' + qualityTag,
-                    title: '',
-                    url: urlStr,
-                    quality: qualityTag,
-                    size: targetDomain,
-                    headers: {
-                        'User-Agent': 'MediaUrl/2',
-                        'Referer': BASE_URL + '/'
-                    },
-                    provider: 'ohato'
+                return resolveDirectMediaUrl(cleanUrl, language).then(function(directUrl) {
+                    return {
+                        name: language.toUpperCase() + ' - ' + qualityTag,
+                        title: '',
+                        url: directUrl,
+                        quality: qualityTag,
+                        size: hostDomain,
+                        headers: {
+                            'User-Agent': 'MediaUrl/2',
+                            'Referer': BASE_URL + '/'
+                        },
+                        provider: 'ohato'
+                    };
                 });
             });
 
