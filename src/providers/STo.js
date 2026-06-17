@@ -19,30 +19,42 @@ function extractDomain(url) {
 }
 
 /**
- * Automatically captures the target destination location header from the gateway wrapper link
+ * Inspects S.to's gateway payload to find the true destination URL via Headers or HTML text
  */
 async function resolveGatewayRedirect(playPath, hosterName) {
     if (!playPath) return null;
     var targetUrl = playPath.startsWith('http') ? playPath : BASE_URL + playPath;
 
     try {
-        // Intercept the redirect before the browser takes action
+        // Let fetch follow standard behavior so we capture HTML meta/JS redirects natively
         var response = await fetch(targetUrl, {
             method: 'GET',
-            headers: DEFAULT_HEADERS,
-            redirect: 'manual' 
+            headers: DEFAULT_HEADERS
         });
 
-        // Read the true destination from the HTTP Location header
-        var trueDestination = response.headers.get('location');
-        if (trueDestination) {
-            return trueDestination;
+        // 1. Check if the final URL changed during the trip
+        if (response.url && !response.url.includes('s.to/r?t=')) {
+            return response.url;
+        }
+
+        var htmlText = await response.text();
+
+        // 2. Scan the body for common patterns like window.location or url= properties
+        var urlRegex = /(https?:\/\/[^\s"'`<>]+)/gi;
+        var matches = htmlText.match(urlRegex) || [];
+
+        for (var rawUrl of matches) {
+            // Filter out internal assets, S.to links, or tracking domains
+            if (!rawUrl.includes('s.to') && !rawUrl.includes('google') && !rawUrl.includes('w3.org')) {
+                // Strip trailing layout elements if the regex grabbed extra text
+                return rawUrl.replace(/[;}"')]/g, '').trim();
+            }
         }
     } catch (e) {
-        // Fallback catch-all if connection fails
+        // Fallback catch-all if execution times out
     }
 
-    // Default structural layout fallback
+    // Hard-coded fallback layout structure
     var nameLower = hosterName.toLowerCase();
     if (nameLower.includes('voe')) return 'https://voe.sx';
     if (nameLower.includes('dood')) return 'https://dood.yt';
