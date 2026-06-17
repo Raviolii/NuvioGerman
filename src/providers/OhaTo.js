@@ -13,10 +13,10 @@ var DEFAULT_HEADERS = {
     'Referer': BASE_URL + '/'
 };
 
-// Helper to resolve redirects via fetch (mimicking the HEAD flow)
+// Helper to follow redirects from standard endpoints (like /web-vod/api/get)
 function getFinalRedirect(url) {
     return fetch(url, {
-        method: 'GET', // Fallback if environment doesn't allow HEAD 
+        method: 'GET',
         headers: DEFAULT_HEADERS,
         redirect: 'follow'
     })
@@ -24,7 +24,7 @@ function getFinalRedirect(url) {
     .catch(function() { return url; });
 }
 
-// 1. Fallback Flow: When Info API fails, extract legacy stream links
+// 1. Fallback Flow: Legacy links
 function handleLegacyLinksFlow(ohaId) {
     var linksUrl = BASE_URL + '/web-vod/api/links?id=' + ohaId;
 
@@ -59,12 +59,10 @@ function handleLegacyLinksFlow(ohaId) {
         .then(function(results) {
             return results.filter(function(item) { return item !== null; });
         })
-        .catch(function() {
-            return [];
-        });
+        .catch(function() { return []; });
 }
 
-// 2. Main Stream Flow: Lokke Signature generation & Source extraction
+// 2. Main Stream Flow: Passing payloads through the Oha.to Lokke Processing Engine
 function handleLokkeFlow(movieData) {
     var lokkePayload = {
         token: 'VKm7XwPbumwb9aeGoVi1fHa6ut1v41a5s6t-yzVQ4qZfN-VwHrdLcD18xPpL4qdzY92xAJiWD_7UZshSngIn_GTbU1uPRTuGFqYQCOBkXzu9YOUPV-u-EbB1WaSZjd6srGhQ',
@@ -125,13 +123,14 @@ function handleLokkeFlow(movieData) {
             clientVersion: movieData.clientVersion
         };
 
-        // Fire and forget item collection, proceed to fetch stream sources
+        // STEP 1: Handshake the data to the Oha Item Server
         return fetch(OHA_ITEM_URL, {
             method: 'POST',
             headers: ohaHeaders,
             body: JSON.stringify(itemPayload)
         })
         .then(function() {
+            // STEP 2: Request processed streams straight back from the Oha Source server
             return fetch(OHA_SOURCE_URL, {
                 method: 'POST',
                 headers: ohaHeaders,
@@ -164,20 +163,12 @@ function handleLokkeFlow(movieData) {
             return out;
         });
     })
-    .catch(function() {
-        return [];
-    });
+    .catch(function() { return []; });
 }
 
-// Main operational entrypoint function matching your provided S.to environment pattern
 function getStreams(tmdbId, type, season, episode) {
     var isSeries = (type === 'series' || type === 'show' || type === 'tv');
-    
-    // Construct the unique Oha ID token
-    var ohaId = isSeries 
-        ? 'series.' + tmdbId + '.' + season + '.' + (episode || 1) 
-        : 'movie.' + tmdbId;
-
+    var ohaId = isSeries ? 'series.' + tmdbId + '.' + season + '.' + (episode || 1) : 'movie.' + tmdbId;
     var infoUrl = BASE_URL + '/web-vod/api/info?id=' + ohaId;
 
     return fetch(infoUrl, { headers: DEFAULT_HEADERS })
@@ -186,12 +177,10 @@ function getStreams(tmdbId, type, season, episode) {
             return res.json();
         })
         .then(function(vodData) {
-            // If info endpoint errors out or returns blank, proceed straight to the legacy links flow
             if (!vodData) {
                 return handleLegacyLinksFlow(ohaId);
             }
 
-            // Structure data payload mapping requirements for Lokke API tracking
             var dynamicMovieData = {
                 language: 'de',
                 region: 'CH',
