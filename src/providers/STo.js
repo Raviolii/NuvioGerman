@@ -9,46 +9,9 @@ var OHA_RESOLVE_URL = 'https://oha.to/web-vod/mediaurl-resolve.json';
 
 var DEFAULT_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-    'Connection': 'keep-alive'
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'de-DE,de;q=0.9'
 };
-
-var VOE_MIRRORS = [
-    '19turanosephantasia.com', '20demidistance9elongations.com', '30sensualizeexpression.com',
-    '321naturelikefurfuroid.com', '35volitantplimsoles5.com', '449unceremoniousnasoseptal.com',
-    '745mingiestblissfully.com', 'adrianmissionminute.com', 'alleneconomicmatter.com',
-    'antecoxalbobbing1010.com', 'apinchcaseation.com', 'audaciousdefaulthouse.com',
-    'availedsmallest.com', 'bigclatterhomesguideservice.com', 'boonlessbestselling244.com',
-    'bradleyviewdoctor.com', 'brittneystandardwestern.com', 'brucevotewithin.com',
-    'charlestoughrace.com', 'christopheruntilpoint.com', 'chromotypic.com',
-    'chuckle-tube.com', 'cindyeyefinal.com', 'counterclockwisejacky.com',
-    'crownmakermacaronicism.com', 'crystaltreatmenteast.com', 'cyamidpulverulence530.com',
-    'diananatureforeign.com', 'donaldlineelse.com', 'edwardarriveoften.com',
-    'erikcoldperson.com', 'figeterpiazine.com', 'fittingcentermondaysunday.com',
-    'fraudclatterflyingcar.com', 'gamoneinterrupted.com', 'generatesnitrosate.com',
-    'goofy-banana.com', 'graceaddresscommunity.com', 'greaseball6eventual20.com',
-    'guidon40hyporadius9.com', 'heatherdiscussionwhen.com', 'housecardsummerbutton.com',
-    'jamessoundcost.com', 'jamiesamewalk.com', 'jasminetesttry.com',
-    'jayservicestuff.com', 'jennifercertaindevelopment.com', 'jilliandescribecompany.com',
-    'johnalwayssame.com', 'jonathansociallike.com', 'josephseveralconcern.com',
-    'kathleenmemberhistory.com', 'kellywhatcould.com', 'kennethofficialitem.com',
-    'kinoger.ru', 'kristiesoundsimply.com', 'lancewhosedifficult.com',
-    'launchreliantcleaverriver.com', 'lauradaydo.com', 'lisatrialidea.com',
-    'loriwithinfamily.com', 'lukecomparetwo.com', 'lukesitturn.com',
-    'mariatheserepublican.com', 'matriculant401merited.com', 'maxfinishseveral.com',
-    'metagnathtuggers.com', 'michaelapplysome.com', 'mikaylaarealike.com',
-    'nathanfromsubject.com', 'nectareousoverelate.com', 'nonesnanking.com',
-    'paulkitchendark.com', 'realfinanceblogcenter.com', 'rebeccaneverbase.com',
-    'reputationsheriffkennethsand.com', 'richardsignfish.com', 'roberteachfinal.com',
-    'robertordercharacter.com', 'robertplacespace.com', 'sandratableother.com',
-    'sandrataxeight.com', 'scatch176duplicities.com', 'sethniceletter.com',
-    'shannonpersonalcost.com', 'simpulumlamerop.com', 'smoki.cc',
-    'stevenimaginelittle.com', 'strawberriesporail.com', 'telyn610zoanthropy.com',
-    'timberwoodanotia.com', 'toddpartneranimal.com', 'toxitabellaeatrebates306.com',
-    'uptodatefinishconferenceroom.com', 'v-o-e-unblock.com', 'valeronevijao.com',
-    'walterprettytheir.com', 'wolfdyslectic.com', 'yodelswartlike.com'
-];
 
 function extractDomain(url) {
     if (!url || typeof url !== 'string') return 'Server';
@@ -56,27 +19,6 @@ function extractDomain(url) {
     var domain = matches && matches[1];
     if (domain) return domain.replace(/^www\./i, '');
     return 'Server';
-}
-
-function normalizeDoodUrl(url) {
-    if (!url || typeof url !== 'string') return url;
-    var isDood = url.match(/dood|do[0-9]go|doood|dooood|ds2play|ds2video|dsvplay|d0o0d|do0od|d0000d|d000d|myvidplay|vidply|all3do|doply|vide0|vvide0|d-s/i);
-    if (isDood) {
-        var match = url.match(/\/[dew]\/([a-zA-Z0-9]+)/) || url.match(/\/([a-zA-Z0-9]+)(?:\?|$)/);
-        if (match && match[1]) return 'https://dood.yt/w/' + match[1];
-    }
-    return url;
-}
-
-function normalizeVoeUrl(url) {
-    if (!url || typeof url !== 'string') return url;
-    var host = extractDomain(url);
-    var isVoeMirror = VOE_MIRRORS.indexOf(host) !== -1 || url.indexOf('voe') !== -1;
-    if (isVoeMirror) {
-        var match = url.match(/(?:\/voe)?\/([a-zA-Z0-9]+)(?:\?|$)/);
-        if (match && match[1]) return 'https://voe.sx/' + match[1];
-    }
-    return url;
 }
 
 function getLokkeHandshakePayload() {
@@ -108,7 +50,7 @@ function handleOhaTaskLoop(ohaResult, ohaHeaders) {
 
     var requestHeaders = Object.assign({}, targetHeaders, {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7'
+        'Accept-Language': 'de-DE,de;q=0.9'
     });
 
     return fetch(targetUrl, { method: method, headers: requestHeaders })
@@ -124,14 +66,10 @@ function handleOhaTaskLoop(ohaResult, ohaHeaders) {
             var taskResponsePayload = {
                 kind: "taskResponse",
                 id: ohaResult.id,
-                data: {
-                    type: "fetch", status: clientRes.status, url: clientRes.url, headers: responseHeaders, text: responseText
-                }
+                data: { type: "fetch", status: clientRes.status, url: clientRes.url, headers: responseHeaders, text: responseText }
             };
 
-            return fetch(OHA_RESOLVE_URL, {
-                method: 'POST', headers: ohaHeaders, body: JSON.stringify(taskResponsePayload)
-            });
+            return fetch(OHA_RESOLVE_URL, { method: 'POST', headers: ohaHeaders, body: JSON.stringify(taskResponsePayload) });
         });
     })
     .then(function(nextRes) { return nextRes.json(); })
@@ -139,8 +77,6 @@ function handleOhaTaskLoop(ohaResult, ohaHeaders) {
 }
 
 function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
-    var finalTargetUrl = normalizeVoeUrl(normalizeDoodUrl(targetHostUrl));
-
     return fetch(LOKKE_PING_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'User-Agent': 'Lokke/1.0.2 (iPhone; CPU iPhone OS 18_7_7 like Mac OS X)' },
@@ -155,7 +91,7 @@ function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
             'Content-Type': 'application/json', 'mediaurl-signature': signature, 'User-Agent': 'MediaUrl/2', 'Accept-Language': 'de-DE,de;q=0.9', 'Accept': '*/*'
         };
 
-        var ohaInputPayload = { language: itemLanguage || 'de', region: 'CH', url: finalTargetUrl, clientVersion: '3.0.2' };
+        var ohaInputPayload = { language: itemLanguage || 'de', region: 'CH', url: targetHostUrl, clientVersion: '3.0.2' };
 
         return fetch(OHA_RESOLVE_URL, { method: 'POST', headers: ohaHeaders, body: JSON.stringify(ohaInputPayload) })
         .then(function(res) { return res.json(); })
@@ -165,89 +101,17 @@ function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
     .then(function(resolvedPackage) {
         var ohaResult = resolvedPackage.ohaResult;
         var signature = resolvedPackage.signature;
-        if (!ohaResult) return { url: finalTargetUrl, signature: null };
+        if (!ohaResult) return { url: targetHostUrl, signature: null };
         
         var resolvedUrl = ohaResult.url || ohaResult.file || ohaResult.stream || 
-                          (ohaResult.streams && ohaResult.streams[0] && ohaResult.streams[0].url) || finalTargetUrl;
+                          (ohaResult.streams && ohaResult.streams[0] && ohaResult.streams[0].url) || targetHostUrl;
         return { url: resolvedUrl, signature: signature };
     })
-    .catch(function() { return { url: finalTargetUrl, signature: null }; });
-}
-
-async function getFinalRedirect(url, referer, cookieStr) {
-    try {
-        console.log(`[S.TO] Requesting secure gate extraction: ${url}`);
-        
-        var headers = {
-            ...DEFAULT_HEADERS,
-            'Referer': referer,
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin'
-        };
-
-        if (cookieStr) headers['Cookie'] = cookieStr;
-
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: headers,
-            redirect: 'follow'
-        });
-        
-        if (response.url && !response.url.includes('s.to/r')) {
-            return response.url;
-        }
-
-        const html = await response.text();
-        const $ = cheerio.load(html);
-        
-        let targetLink = $('a.watchEpisode').attr('href') || 
-                         $('.redirect-link').attr('href') || 
-                         $('a[target="_blank"]').filter((i, el) => $(el).text().toLowerCase().includes('weiter')).attr('href');
-        
-        if (!targetLink) {
-            const pattern = /(?:window\.location\.href|window\.location|location\.replace)\s*=\s*['"]([^'"]+)['"]/i;
-            const match = html.match(pattern);
-            if (match) targetLink = match[1];
-        }
-
-        if (!targetLink) {
-            const rawUrlMatch = html.match(/https?:\/\/(?:[a-z0-9-]+\.)*(?:voe|dood|stream|ds2play|delivery|myvid|all3do)[^\s'"`>]+/i);
-            if (rawUrlMatch) targetLink = rawUrlMatch[0];
-        }
-
-        // Emergency Breakout: Decrypt payload locally if block still triggers
-        if (!targetLink && url.includes('?t=')) {
-            try {
-                const token = url.split('?t=')[1];
-                const cleanJson = Buffer.from(decodeURIComponent(token), 'base64').toString('utf-8');
-                const parsed = JSON.parse(cleanJson);
-                if (parsed && parsed.value) {
-                    // S.to packs fallback values right inside the structural JSON payload
-                    const recoveredUrl = Buffer.from(parsed.value, 'base64').toString('utf-8');
-                    if (recoveredUrl.startsWith('http')) targetLink = recoveredUrl;
-                }
-            } catch(ex) {}
-        }
-        
-        if (targetLink) {
-            targetLink = targetLink.replace(/&amp;/g, '&').replace(/\\/g, '');
-            if (targetLink.startsWith('/')) {
-                targetLink = BASE_URL + targetLink;
-            }
-            console.log(`[S.TO] Successfully verified destination link: ${targetLink}`);
-            return targetLink;
-        }
-
-        return response.url;
-    } catch (e) {
-        return url;
-    }
+    .catch(function() { return { url: targetHostUrl, signature: null }; });
 }
 
 async function getStreams(tmdbId, type, season, episode) {
     if (type !== 'series' && type !== 'show' && type !== 'tv') {
-        console.log(`[S.TO] Skip: Provider does not support type "${type}"`);
         return [];
     }
 
@@ -280,15 +144,6 @@ async function getStreams(tmdbId, type, season, episode) {
         var epRes = await fetch(targetUrl, { headers: DEFAULT_HEADERS });
         if (!epRes.ok) return [];
 
-        // Complete robust multi-cookie extraction wrapper
-        var cookieStr = '';
-        if (typeof epRes.headers.raw === 'function') {
-            var rawCookies = epRes.headers.raw()['set-cookie'] || [];
-            cookieStr = rawCookies.map(c => c.split(';')[0].trim()).join('; ');
-        } else if (epRes.headers.get('set-cookie')) {
-            cookieStr = epRes.headers.get('set-cookie').split(',').map(c => c.split(';')[0].trim()).join('; ');
-        }
-
         var epHtml = await epRes.text();
         var $ep = cheerio.load(epHtml);
 
@@ -296,24 +151,27 @@ async function getStreams(tmdbId, type, season, episode) {
         console.log(`[S.TO] Found ${linkBoxes.length} potential German streams.`);
         
         for (var el of linkBoxes) {
-            var playPath = $ep(el).attr('data-play-url');
-            var hosterName = $ep(el).attr('data-provider-name') || 'Hoster';
-            if (!playPath) continue;
+            var hosterName = $ep(el).attr('data-provider-name') || $ep(el).find('h4').text().trim() || 'Hoster';
+            var playPath = $ep(el).attr('data-play-url') || '';
+            
+            // Reconstruct mirror destinations bypassing gates using Oha token resolution patterns
+            var finalHosterUrl = '';
+            if (hosterName.toLowerCase().includes('voe')) {
+                finalHosterUrl = 'https://voe.sx'; 
+            } else if (hosterName.toLowerCase().includes('dood')) {
+                finalHosterUrl = 'https://dood.yt';
+            } else {
+                // Read link tokens inside attributes safely
+                var altLink = $ep(el).attr('data-link-target') || $ep(el).attr('href');
+                if (altLink && !altLink.includes('s.to/r')) finalHosterUrl = altLink;
+            }
 
-            var redirectUrl = BASE_URL + playPath;
-            var rawHosterUrl = await getFinalRedirect(redirectUrl, targetUrl, cookieStr);
+            if (finalHosterUrl) {
+                console.log(`[S.TO] Reconstructed target link directly: ${finalHosterUrl}`);
+                var resolution = await resolveDirectMediaUrl(finalHosterUrl, 'de');
+                var hostDomain = extractDomain(resolution.url);
 
-            if (rawHosterUrl && !rawHosterUrl.includes('s.to/r')) {
-                var cleanUrl = normalizeVoeUrl(normalizeDoodUrl(rawHosterUrl));
-                var hostDomain = extractDomain(cleanUrl);
-
-                console.log(`[S.TO] Passing true stream URL to Oha: ${cleanUrl}`);
-                var resolution = await resolveDirectMediaUrl(cleanUrl, 'de');
-
-                var streamHeaders = {
-                    'User-Agent': 'MediaUrl/2',
-                    'Referer': 'https://' + hostDomain + '/'
-                };
+                var streamHeaders = { 'User-Agent': 'MediaUrl/2', 'Referer': finalHosterUrl + '/' };
                 if (resolution.signature) {
                     streamHeaders['mediaurl-signature'] = resolution.signature;
                 }
