@@ -14,6 +14,43 @@ var DEFAULT_HEADERS = {
     'Referer': BASE_URL + '/'
 };
 
+// Known Voe mirror domains that need to be rewritten to voe.sx
+var VOE_MIRRORS = [
+    '19turanosephantasia.com', '20demidistance9elongations.com', '30sensualizeexpression.com',
+    '321naturelikefurfuroid.com', '35volitantplimsoles5.com', '449unceremoniousnasoseptal.com',
+    '745mingiestblissfully.com', 'adrianmissionminute.com', 'alleneconomicmatter.com',
+    'antecoxalbobbing1010.com', 'apinchcaseation.com', 'audaciousdefaulthouse.com',
+    'availedsmallest.com', 'bigclatterhomesguideservice.com', 'boonlessbestselling244.com',
+    'bradleyviewdoctor.com', 'brittneystandardwestern.com', 'brucevotewithin.com',
+    'charlestoughrace.com', 'christopheruntilpoint.com', 'chromotypic.com',
+    'chuckle-tube.com', 'cindyeyefinal.com', 'counterclockwisejacky.com',
+    'crownmakermacaronicism.com', 'crystaltreatmenteast.com', 'cyamidpulverulence530.com',
+    'diananatureforeign.com', 'donaldlineelse.com', 'edwardarriveoften.com',
+    'erikcoldperson.com', 'figeterpiazine.com', 'fittingcentermondaysunday.com',
+    'fraudclatterflyingcar.com', 'gamoneinterrupted.com', 'generatesnitrosate.com',
+    'goofy-banana.com', 'graceaddresscommunity.com', 'greaseball6eventual20.com',
+    'guidon40hyporadius9.com', 'heatherdiscussionwhen.com', 'housecardsummerbutton.com',
+    'jamessoundcost.com', 'jamiesamewalk.com', 'jasminetesttry.com',
+    'jayservicestuff.com', 'jennifercertaindevelopment.com', 'jilliandescribecompany.com',
+    'johnalwayssame.com', 'jonathansociallike.com', 'josephseveralconcern.com',
+    'kathleenmemberhistory.com', 'kellywhatcould.com', 'kennethofficialitem.com',
+    'kinoger.ru', 'kristiesoundsimply.com', 'lancewhosedifficult.com',
+    'launchreliantcleaverriver.com', 'lauradaydo.com', 'lisatrialidea.com',
+    'loriwithinfamily.com', 'lukecomparetwo.com', 'lukesitturn.com',
+    'mariatheserepublican.com', 'matriculant401merited.com', 'maxfinishseveral.com',
+    'metagnathtuggers.com', 'michaelapplysome.com', 'mikaylaarealike.com',
+    'nathanfromsubject.com', 'nectareousoverelate.com', 'nonesnanking.com',
+    'paulkitchendark.com', 'realfinanceblogcenter.com', 'rebeccaneverbase.com',
+    'reputationsheriffkennethsand.com', 'richardsignfish.com', 'roberteachfinal.com',
+    'robertordercharacter.com', 'robertplacespace.com', 'sandratableother.com',
+    'sandrataxeight.com', 'scatch176duplicities.com', 'sethniceletter.com',
+    'shannonpersonalcost.com', 'simpulumlamerop.com', 'smoki.cc',
+    'stevenimaginelittle.com', 'strawberriesporail.com', 'telyn610zoanthropy.com',
+    'timberwoodanotia.com', 'toddpartneranimal.com', 'toxitabellaeatrebates306.com',
+    'uptodatefinishconferenceroom.com', 'v-o-e-unblock.com', 'valeronevijao.com',
+    'walterprettytheir.com', 'wolfdyslectic.com', 'yodelswartlike.com'
+];
+
 // Extracts a clean domain name from a full URL string
 function extractDomain(url) {
     if (!url || typeof url !== 'string') return 'Server';
@@ -37,15 +74,19 @@ function normalizeDoodUrl(url) {
     return url;
 }
 
-// Ensures Voe streams are normalized to use the base voe.sx domain
+// Rewrites Voe links and known Voe mirrors to use the base voe.sx domain cleanly
 function normalizeVoeUrl(url) {
     if (!url || typeof url !== 'string') return url;
-    if (url.indexOf('voe') === -1) return url;
-
-    // Handles patterns like voe.sx, voe.com, voe-unblock, etc.
-    var match = url.match(/https?:\/\/[^\/]+\/([a-zA-Z0-9]+)/);
-    if (match && match[1]) {
-        return 'https://voe.sx/' + match[1];
+    
+    var host = extractDomain(url);
+    var isVoeMirror = VOE_MIRRORS.indexOf(host) !== -1 || url.indexOf('voe') !== -1;
+    
+    if (isVoeMirror) {
+        // Matches the alphanumeric file ID at the end of the URL path
+        var match = url.match(/(?:\/voe)?\/([a-zA-Z0-9]+)(?:\?|$)/);
+        if (match && match[1]) {
+            return 'https://voe.sx/' + match[1];
+        }
     }
     return url;
 }
@@ -98,7 +139,6 @@ function handleOhaTaskLoop(ohaResult, ohaHeaders) {
     var targetHeaders = params.headers || {};
     var method = params.method || 'GET';
 
-    // Mix in default client language headers
     var requestHeaders = Object.assign({}, targetHeaders, {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7'
@@ -138,12 +178,10 @@ function handleOhaTaskLoop(ohaResult, ohaHeaders) {
     })
     .then(function(nextRes) { return nextRes.json(); })
     .then(function(nextOhaResult) {
-        // Recurse if another challenge request comes back
         return handleOhaTaskLoop(nextOhaResult, ohaHeaders);
     });
 }
 
-// Sends the transformed target URL to the Oha Server backend via the authenticated handshake loop
 function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
     var finalTargetUrl = normalizeDoodUrl(targetHostUrl);
     finalTargetUrl = normalizeVoeUrl(finalTargetUrl);
@@ -183,7 +221,6 @@ function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
         })
         .then(function(res) { return res.json(); })
         .then(function(initialOhaResult) {
-            // Process task loop challenges if present (critical for Voe)
             return handleOhaTaskLoop(initialOhaResult, ohaHeaders);
         });
     })
