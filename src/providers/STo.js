@@ -6,11 +6,18 @@ var TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 var DEFAULT_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
-    'Cache-Control': 'no-cache',
-    'Pragma': 'no-cache'
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1',
+    'Cache-Control': 'max-age=0'
 };
+
+// Helper to pause execution briefly to bypass Cloudflare anti-hammering triggers
+var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function extractDomain(url) {
     if (!url || typeof url !== 'string') return 'Server';
@@ -21,32 +28,30 @@ function extractDomain(url) {
 }
 
 /**
- * Step-by-step redirect hunter that grabs the unique token-path location 
- * before external tracking networks trigger security walls.
+ * Handles manual redirection tracking using randomized timing offsets to bypass rate limits
  */
 async function resolveGatewayRedirect(playPath, hosterName) {
     if (!playPath) return null;
     var targetUrl = playPath.startsWith('http') ? playPath : BASE_URL + playPath;
 
     try {
-        // Step 1: Request the S.to gateway wrapper using manual redirection flags
+        // Enforce a pacing buffer before querying the gateway endpoint
+        await sleep(400 + Math.random() * 300);
+
         var firstHop = await fetch(targetUrl, {
             method: 'GET',
             headers: {
                 ...DEFAULT_HEADERS,
-                'Referer': targetUrl
+                'Referer': BASE_URL + '/'
             },
             redirect: 'manual'
         });
 
-        // Step 2: Extract the raw location header target if served instantly
         var location = firstHop.headers.get('location');
         
-        // Step 3: If S.to delivers an intermediary HTML countdown/meta script, scan the body
+        // If the redirect is hidden inside an inline JS string or Meta tag fallback
         if (!location) {
             var html = await firstHop.text();
-            
-            // Extract using explicit wrapper assignments
             var metaMatch = html.match(/meta\s+http-equiv=["']refresh["']\s+content=["']\d+;\s*url=([^"']+)["']/i);
             if (metaMatch && metaMatch[1]) {
                 location = metaMatch[1];
@@ -56,33 +61,29 @@ async function resolveGatewayRedirect(playPath, hosterName) {
             }
         }
 
-        // Step 4: Follow the deep link directly to grab its routing variables
         if (location) {
             var finalDestination = location.startsWith('http') ? location : BASE_URL + location;
-            
-            // Clean common artifact escapes from string extractions
             finalDestination = finalDestination.replace(/&amp;/g, '&').trim();
 
-            var secondHop = await fetch(finalDestination, {
-                method: 'GET',
-                headers: {
-                    ...DEFAULT_HEADERS,
-                    'Referer': BASE_URL + '/'
-                },
-                redirect: 'manual'
-            });
-
-            var finalLocation = secondHop.headers.get('location') || secondHop.url;
-            if (finalLocation && finalLocation !== finalDestination) {
-                return finalLocation;
+            // S.to gateway redirects occasionally require a secondary verification bounce
+            if (finalDestination.includes('s.to/r?t=')) {
+                await sleep(250);
+                var intermediateHop = await fetch(finalDestination, {
+                    method: 'GET',
+                    headers: { ...DEFAULT_HEADERS, 'Referer': targetUrl },
+                    redirect: 'manual'
+                });
+                var freshLocation = intermediateHop.headers.get('location');
+                if (freshLocation) finalDestination = freshLocation;
             }
+
             return finalDestination;
         }
     } catch (e) {
-        // Graceful fallback logging
+        // Fallback catch-all logic
     }
 
-    // Structural recovery string if endpoints timeout
+    // Dynamic recovery fallback layout structures
     var nameLower = hosterName.toLowerCase();
     if (nameLower.includes('voe')) return 'https://voe.sx';
     if (nameLower.includes('dood')) return 'https://dood.yt';
@@ -129,11 +130,11 @@ async function getStreams(tmdbId, type, season, episode) {
         var linkBoxes = $ep('button.link-box[data-language-id="1"]').toArray();
         console.log(`[S.TO] Found ${linkBoxes.length} potential German streams.`);
         
+        // Linear execution loop paired with timing delays to avoid triggering anti-bot firewalls
         for (var el of linkBoxes) {
             var hosterName = $ep(el).attr('data-provider-name') || $ep(el).find('h4').text().trim() || 'Hoster';
             var playPath = $ep(el).attr('data-play-url') || '';
             
-            // Intercept and parse the full redirect path manually
             var finalHosterUrl = await resolveGatewayRedirect(playPath, hosterName);
 
             if (finalHosterUrl) {
