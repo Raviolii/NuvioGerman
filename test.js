@@ -15,7 +15,9 @@ async function runTest(label, provider, id, type, season, episode) {
         if (streams && streams.length > 0) {
             console.log(`✅ SUCCESS! ${label} found ${streams.length} streams:`);
             streams.forEach((s, i) => {
-                console.log(`  [${i + 1}] ${s.meta.title}`);
+                // Safeguard property extraction so it never crashes on undefined 'meta'
+                const displayTitle = s.title || (s.meta && s.meta.title) || s.name || 'Unknown Hoster';
+                console.log(`  [${i + 1}] ${displayTitle}`);
                 console.log(`      URL: ${s.url}`);
             });
         } else {
