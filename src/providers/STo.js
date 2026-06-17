@@ -229,7 +229,7 @@ function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
 }
 
 // ==========================================
-// S.TO REDIRECT EXTRACTOR
+// ROBUST S.TO REDIRECT EXTRACTOR
 // ==========================================
 async function getFinalRedirect(url, referer) {
     try {
@@ -241,20 +241,29 @@ async function getFinalRedirect(url, referer) {
         
         const html = await response.text();
         
-        // S.to intermediate gateway pages output the real streaming path inside an anchor tag
-        // e.g., <a href="https://voe.sx/..." class="watchEpisode">
+        // 1. Try DOM selectors if it's rendered inside elements
         const $ = cheerio.load(html);
-        const targetLink = $('a.watchEpisode').attr('href') || $('.redirect-link').attr('href');
+        let targetLink = $('a.watchEpisode').attr('href') || $('.redirect-link').attr('href');
+        
+        // 2. Fallback: Search the raw script body for common inline redirection parameters
+        if (!targetLink) {
+            const windowLocationMatch = html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/i);
+            const refreshMetaMatch = html.match(/url=['"]?([^'"]+?)['">]/i);
+            const genericUrlMatch = html.match(/https?:\/\/(?:[a-z0-9-]+\.)*(?:voe|dood|stream|ds2play)[^\s'"]+/i);
+            
+            targetLink = (windowLocationMatch && windowLocationMatch[1]) || 
+                         (refreshMetaMatch && refreshMetaMatch[1]) ||
+                         (genericUrlMatch && genericUrlMatch[0]);
+        }
         
         if (targetLink) {
-            console.log(`[S.TO] Extracted true Hoster URL from gateway: ${targetLink}`);
+            console.log(`[S.TO] Extracted true Hoster URL: ${targetLink}`);
             return targetLink;
         }
 
-        // Fallback to checking location tracking if anchor scraping isn't hit
         return response.url;
     } catch (e) {
-        console.error(`[S.TO] Redirect generation tracking failed: ${e.message}`);
+        console.error(`[S.TO] Redirect tracking failed: ${e.message}`);
         return url;
     }
 }
@@ -350,7 +359,7 @@ async function getStreams(tmdbId, type, season, episode) {
 
                 results.push({
                     name: 'DE - ' + hosterName.toUpperCase(),
-                    title: 'DE - ' + hosterName.toUpperCase(), // Added fallback to satisfy test.js .title checks
+                    title: 'DE - ' + hosterName.toUpperCase(), 
                     url: resolution.url,
                     quality: 'HD',
                     size: hostDomain,
