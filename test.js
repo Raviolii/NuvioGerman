@@ -1,5 +1,6 @@
 const filmpalast = require('./src/providers/FilmpalastTo.js');
 const sto = require('./src/providers/STo.js');
+const ohato = require('./src/providers/OhaTo.js');
 
 async function runTest(label, provider, id, type, season, episode) {
     console.log(`\n🚀 Testing ${label} locally...`);
@@ -39,6 +40,17 @@ async function start() {
     // ==========================================
     const theBoysTmdbId = "76479"; 
     await runTest("S.to", sto, theBoysTmdbId, "series", 1, 1);
+
+    // ==========================================
+    // 3. Test Oha.to (Movie & Series)
+    // Uses TMDB IDs directly
+    // ==========================================
+    console.log("\n--- Running Oha.to Tests ---");
+    // Test Oha.to with a Movie (Inside Out 2)
+    await runTest("Oha.to (Movie)", ohato, "1022789", "movie");
+    
+    // Test Oha.to with a Series (The Boys Season 1 Episode 1)
+    await runTest("Oha.to (Series)", ohato, "76479", "series", 1, 1);
 }
 
 start();
