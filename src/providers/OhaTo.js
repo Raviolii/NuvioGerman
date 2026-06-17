@@ -14,6 +14,18 @@ var DEFAULT_HEADERS = {
     'Referer': BASE_URL + '/'
 };
 
+// Extracts a clean domain name from a full URL string
+function extractDomain(url) {
+    if (!url || typeof url !== 'string') return 'Server';
+    var matches = url.match(/^https?:\/\/([^/?#]+)(?:[/?#]|$)/i);
+    var domain = matches && matches[1];
+    if (domain) {
+        // Strip out 'www.' subdomains if present
+        return domain.replace(/^www\./i, '');
+    }
+    return 'Server';
+}
+
 // Standardizes miscellaneous Doodstream variations to the exact https://dood.yt/w/ID format
 function normalizeDoodUrl(url) {
     if (!url || typeof url !== 'string') return url;
@@ -147,9 +159,12 @@ function handleLegacyLinksFlow(ohaId, fallbackTitle) {
                         var qualityTag = link.tag || 'HD';
 
                         if (finalUrl.indexOf('dood') !== -1 || finalUrl.indexOf('/w/') !== -1) {
-                            return resolveDirectMediaUrl(finalUrl, language).then(function(directUrl) {
+                            var normalizedUrl = normalizeDoodUrl(finalUrl);
+                            var hostDomain = extractDomain(normalizedUrl);
+
+                            return resolveDirectMediaUrl(normalizedUrl, language).then(function(directUrl) {
                                 return {
-                                    name: language.toUpperCase() + ' - ' + qualityTag,
+                                    name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + hostDomain,
                                     title: fallbackTitle,
                                     url: directUrl,
                                     quality: qualityTag,
@@ -163,8 +178,9 @@ function handleLegacyLinksFlow(ohaId, fallbackTitle) {
                             });
                         }
 
+                        var standardDomain = extractDomain(finalUrl);
                         return {
-                            name: language.toUpperCase() + ' - ' + qualityTag,
+                            name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + standardDomain,
                             title: fallbackTitle,
                             url: finalUrl,
                             quality: qualityTag,
@@ -262,9 +278,12 @@ function handleLokkeFlow(movieData) {
                 }
 
                 if (urlStr.indexOf('dood') !== -1 || urlStr.indexOf('/w/') !== -1) {
-                    return resolveDirectMediaUrl(urlStr, language).then(function(directUrl) {
+                    var normalizedDood = normalizeDoodUrl(urlStr);
+                    var doodDomain = extractDomain(normalizedDood);
+
+                    return resolveDirectMediaUrl(normalizedDood, language).then(function(directUrl) {
                         return {
-                            name: language.toUpperCase() + ' - ' + qualityTag,
+                            name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + doodDomain,
                             title: mediaTitle,
                             url: directUrl,
                             quality: qualityTag,
@@ -278,8 +297,9 @@ function handleLokkeFlow(movieData) {
                     });
                 }
 
+                var targetDomain = extractDomain(urlStr);
                 return Promise.resolve({
-                    name: language.toUpperCase() + ' - ' + qualityTag,
+                    name: language.toUpperCase() + ' - ' + qualityTag + ' - ' + targetDomain,
                     title: mediaTitle,
                     url: urlStr,
                     quality: qualityTag,
