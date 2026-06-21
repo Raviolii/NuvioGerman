@@ -335,6 +335,18 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
         for (var el of linkBoxes) {
             var playPath = $ep(el).attr('data-play-url');
             var hosterName = $ep(el).attr('data-provider-name') || 'Hoster';
+            var languageId = $ep(el).attr('data-language-id') || '';
+            var languageLabel = $ep(el).attr('data-language-label') || '';
+
+            function mapLanguage(label, id) {
+                var l = (label || '').toLowerCase();
+                if (id === '1' || l.indexOf('deutsch') === 0 || l === 'de' || l.indexOf('german') === 0) return 'de';
+                if (id === '2' || l.indexOf('engl') === 0 || l === 'en' || l.indexOf('english') === 0) return 'en';
+                if (id === '3') return 'de';
+                return (l.substr(0,2) || 'de');
+            }
+
+            var langCode = mapLanguage(languageLabel, languageId);
 
             if (!playPath) continue;
 
@@ -367,9 +379,14 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
                     hostDomain = (new URL(finalUrl)).hostname.replace(/^www\./i, '');
                 } catch (e) {}
 
+                var displayLang = langCode ? langCode.toUpperCase() : (languageLabel || 'DE');
                 var streamObj = {
-                    name: `${hosterName} (DE) - S${season}E${episode}`,
-                    title: `${hosterName} (DE) - S${season}E${episode}`,
+                    name: `${hosterName} (${displayLang}) - S${season}E${episode}`,
+                    title: `${hosterName} (${displayLang}) - S${season}E${episode}`,
+                    language: langCode,
+                    meta: {
+                        countryCodes: [langCode]
+                    },
                     url: finalUrl,
                     quality: 'HD',
                     size: hostDomain,
