@@ -62,6 +62,16 @@ function extractDomain(url) {
     return 'Server';
 }
 
+module.exports = {
+    resolveDirectMediaUrl: resolveDirectMediaUrl,
+    normalizeDoodUrl: normalizeDoodUrl,
+    normalizeVoeUrl: normalizeVoeUrl,
+    getFinalRedirect: getFinalRedirect,
+    handleLokkeFlow: handleLokkeFlow,
+    handleLegacyLinksFlow: handleLegacyLinksFlow,
+    extractDomain: extractDomain
+};
+
 // Standardizes miscellaneous Doodstream variations to the exact https://dood.yt/e/ID format
 function normalizeDoodUrl(url) {
     if (!url || typeof url !== 'string') return url;

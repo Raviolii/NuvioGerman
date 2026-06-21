@@ -1,5 +1,223 @@
 var cheerio = require('cheerio-without-node-native');
-var oha = require('./OhaTo.js');
+
+// NOTE: Plugin environments may not allow requiring other provider files.
+// Inline a minimal subset of OhaTo helpers here so `S.to` works standalone.
+
+function extractDomain(url) {
+    if (!url || typeof url !== 'string') return 'Server';
+    var matches = url.match(/^https?:\/\/([^/?#]+)(?:[/?#]|$)/i);
+    var domain = matches && matches[1];
+    if (domain) return domain.replace(/^www\./i, '');
+    return 'Server';
+}
+
+function normalizeDoodUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    var isDood = url.match(/dood|do[0-9]go|doood|dooood|ds2play|ds2video|dsvplay|d0o0d|do0od|d0000d|d000d|myvidplay|vidply|all3do|doply|vide0|vvide0|d-s|playmogo|playmogo.com/i);
+    if (isDood) {
+        var playmogoMatch = url.match(/playmogo\.com\/e\/([a-zA-Z0-9]+)/i);
+        if (playmogoMatch && playmogoMatch[1]) return 'https://dood.yt/e/' + playmogoMatch[1];
+        var match = url.match(/\/[dew]\/([a-zA-Z0-9]+)/) || url.match(/\/([a-zA-Z0-9]+)(?:\?|$)/);
+        if (match && match[1]) return 'https://dood.yt/e/' + match[1];
+    }
+    return url;
+}
+
+function normalizeVoeUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    var host = extractDomain(url);
+    var isVoe = url.indexOf('voe') !== -1; // simple heuristic
+    if (isVoe) {
+        var match = url.match(/(?:\/voe)?\/([a-zA-Z0-9]+)(?:\?|$)/);
+        if (match && match[1]) return 'https://voe.sx/e/' + match[1];
+    }
+    return url;
+}
+
+// VOE mirrors list and full Oha-like resolver logic (inlined)
+var LOKKE_PING_URL = 'https://www.lokke.app/api/app/ping';
+var OHA_RESOLVE_URL = 'https://oha.to/web-vod/mediaurl-resolve.json';
+
+var VOE_MIRRORS = [
+    '19turanosephantasia.com', '20demidistance9elongations.com', '30sensualizeexpression.com',
+    '321naturelikefurfuroid.com', '35volitantplimsoles5.com', '449unceremoniousnasoseptal.com',
+    '745mingiestblissfully.com', 'adrianmissionminute.com', 'alleneconomicmatter.com',
+    'antecoxalbobbing1010.com', 'apinchcaseation.com', 'audaciousdefaulthouse.com',
+    'availedsmallest.com', 'bigclatterhomesguideservice.com', 'boonlessbestselling244.com',
+    'bradleyviewdoctor.com', 'brittneystandardwestern.com', 'brucevotewithin.com',
+    'charlestoughrace.com', 'christopheruntilpoint.com', 'chromotypic.com',
+    'chuckle-tube.com', 'cindyeyefinal.com', 'counterclockwisejacky.com',
+    'crownmakermacaronicism.com', 'crystaltreatmenteast.com', 'cyamidpulverulence530.com',
+    'diananatureforeign.com', 'donaldlineelse.com', 'edwardarriveoften.com',
+    'erikcoldperson.com', 'figeterpiazine.com', 'fittingcentermondaysunday.com',
+    'fraudclatterflyingcar.com', 'gamoneinterrupted.com', 'generatesnitrosate.com',
+    'goofy-banana.com', 'graceaddresscommunity.com', 'greaseball6eventual20.com',
+    'guidon40hyporadius9.com', 'heatherdiscussionwhen.com', 'housecardsummerbutton.com',
+    'jamessoundcost.com', 'jamiesamewalk.com', 'jasminetesttry.com',
+    'jayservicestuff.com', 'jennifercertaindevelopment.com', 'jilliandescribecompany.com',
+    'johnalwayssame.com', 'jonathansociallike.com', 'josephseveralconcern.com',
+    'kathleenmemberhistory.com', 'kellywhatcould.com', 'kennethofficialitem.com',
+    'kinoger.ru', 'kristiesoundsimply.com', 'lancewhosedifficult.com',
+    'launchreliantcleaverriver.com', 'lauradaydo.com', 'lisatrialidea.com',
+    'loriwithinfamily.com', 'lukecomparetwo.com', 'lukesitturn.com',
+    'mariatheserepublican.com', 'matriculant401merited.com', 'maxfinishseveral.com',
+    'metagnathtuggers.com', 'michaelapplysome.com', 'mikaylaarealike.com',
+    'nathanfromsubject.com', 'nectareousoverelate.com', 'nonesnanking.com',
+    'paulkitchendark.com', 'realfinanceblogcenter.com', 'rebeccaneverbase.com',
+    'reputationsheriffkennethsand.com', 'richardsignfish.com', 'roberteachfinal.com',
+    'robertordercharacter.com', 'robertplacespace.com', 'sandratableother.com',
+    'sandrataxeight.com', 'scatch176duplicities.com', 'sethniceletter.com',
+    'shannonpersonalcost.com', 'simpulumlamerop.com', 'smoki.cc',
+    'stevenimaginelittle.com', 'strawberriesporail.com', 'telyn610zoanthropy.com',
+    'timberwoodanotia.com', 'toddpartneranimal.com', 'toxitabellaeatrebates306.com',
+    'uptodatefinishconferenceroom.com', 'v-o-e-unblock.com', 'valeronevijao.com',
+    'walterprettytheir.com', 'wolfdyslectic.com', 'yodelswartlike.com'
+];
+
+function getLokkeHandshakePayload() {
+    return {
+        token: 'VKm7XwPbumwb9aeGoVi1fHa6ut1v41a5s6t-yzVQ4qZfN-VwHrdLcD18xPpL4qdzY92xAJiWD_7UZshSngIn_GTbU1uPRTuGFqYQCOBkXzu9YOUPV-u-EbB1WaSZjd6srGhQ',
+        reason: 'app-blur',
+        locale: 'de',
+        theme: 'dark',
+        metadata: {
+            device: { 
+                type: 'Handset', 
+                brand: 'Apple', 
+                model: 'iPhone 15 Pro', 
+                name: 'iPhone', 
+                uniqueId: 'E9B56A1F-810A-4C23-9D22-C8542FBB0D1C' 
+            },
+            os: { name: 'ios', version: '18.7.7', abis: ['ARM64E'], host: 'unknown' },
+            app: { platform: 'ios', version: '1.0.2', buildId: '1.0.2', engine: 'jsc', installer: 'TestFlight' },
+            version: { package: 'app.lokke.main', binary: '1.0.2', js: '1.0.4' },
+        },
+        appFocusTime: 0,
+        playerActive: false,
+        playDuration: 0,
+        devMode: true,
+        hasAddon: true,
+        castConnected: false,
+        package: 'app.lokke.main',
+        version: '1.0.4',
+        process: 'app',
+        firstAppStart: Date.now(),
+        lastAppStart: Date.now(),
+        ipLocation: null,
+        adblockEnabled: true,
+        proxy: { supported: ['openvpn'], engine: 'openvpn', enabled: false, autoServer: true, id: 'fi-hel' },
+        iap: { supported: true, error: 'No in-app payment subscriptions found' }
+    };
+}
+
+function handleOhaTaskLoop(ohaResult, ohaHeaders) {
+    if (!ohaResult || ohaResult.kind !== 'taskRequest') {
+        return Promise.resolve(ohaResult);
+    }
+
+    var taskData = ohaResult.data || {};
+    var targetUrl = taskData.url;
+    var params = taskData.params || {};
+    var targetHeaders = params.headers || {};
+    var method = params.method || 'GET';
+
+    var requestHeaders = Object.assign({}, targetHeaders, {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7'
+    });
+
+    return fetch(targetUrl, {
+        method: method,
+        headers: requestHeaders
+    })
+    .then(function(clientRes) {
+        return clientRes.text().then(function(responseText) {
+            var responseHeaders = {};
+            if (typeof clientRes.headers.entries === 'function') {
+                for (var pair of clientRes.headers.entries()) {
+                    responseHeaders[pair[0]] = pair[1];
+                }
+            }
+
+            var taskResponsePayload = {
+                kind: "taskResponse",
+                id: ohaResult.id,
+                data: {
+                    type: "fetch",
+                    status: clientRes.status,
+                    url: clientRes.url,
+                    headers: responseHeaders,
+                    text: responseText
+                }
+            };
+
+            return fetch(OHA_RESOLVE_URL, {
+                method: 'POST',
+                headers: ohaHeaders,
+                body: JSON.stringify(taskResponsePayload)
+            });
+        });
+    })
+    .then(function(nextRes) { return nextRes.json(); })
+    .then(function(nextOhaResult) {
+        return handleOhaTaskLoop(nextOhaResult, ohaHeaders);
+    });
+}
+
+function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
+    var finalTargetUrl = normalizeDoodUrl(targetHostUrl);
+    finalTargetUrl = normalizeVoeUrl(finalTargetUrl);
+
+    return fetch(LOKKE_PING_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Lokke/1.0.2 (iPhone; CPU iPhone OS 18_7_7 like Mac OS X)'
+        },
+        body: JSON.stringify(getLokkeHandshakePayload())
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(lokkeData) {
+        var signature = lokkeData && lokkeData.addonSig;
+        if (!signature) throw new Error('OhaTo: Signature validation failed');
+
+        var ohaHeaders = {
+            'Content-Type': 'application/json',
+            'mediaurl-signature': signature,
+            'User-Agent': 'MediaUrl/2',
+            'Accept-Language': 'de-DE,de;q=0.9',
+            'Accept': '*/*'
+        };
+
+        var ohaInputPayload = {
+            language: itemLanguage || 'de',
+            region: 'CH',
+            url: finalTargetUrl,
+            clientVersion: '3.0.2'
+        };
+
+        return fetch(OHA_RESOLVE_URL, {
+            method: 'POST',
+            headers: ohaHeaders,
+            body: JSON.stringify(ohaInputPayload)
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(initialOhaResult) {
+            return handleOhaTaskLoop(initialOhaResult, ohaHeaders);
+        });
+    })
+    .then(function(ohaResult) {
+        if (!ohaResult) return finalTargetUrl;
+        
+        var resolvedUrl = ohaResult.url || ohaResult.file || ohaResult.stream || 
+                          (ohaResult.streams && ohaResult.streams[0] && ohaResult.streams[0].url) || 
+                          (ohaResult.links && ohaResult.links[0]) || finalTargetUrl;
+        return resolvedUrl;
+    })
+    .catch(function() {
+        return finalTargetUrl;
+    });
+}
 
 var BASE_URL = 'https://s.to';
 var TMDB_API_KEY = 'b1b501578f88cfaaaf0178b3d392ccf9';
@@ -127,11 +345,9 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
             // Map certain host URLs to dood format first (Playmogo etc.)
             rawHosterUrl = mapToDood(rawHosterUrl);
 
-            // Also normalize Voe mirrors to the consistent /e/ form using OhaTo helper
+            // Also normalize Voe mirrors to the consistent /e/ form using local helper
             try {
-                if (oha && typeof oha.normalizeVoeUrl === 'function') {
-                    rawHosterUrl = oha.normalizeVoeUrl(rawHosterUrl);
-                }
+                rawHosterUrl = normalizeVoeUrl(rawHosterUrl);
             } catch (e) {
                 console.error('[S.TO] Voe normalization failed:', e && e.message);
             }
@@ -141,11 +357,9 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
                 // Let Oha.to resolve direct media URLs and normalize hosts
                 var finalUrl = rawHosterUrl;
                 try {
-                    if (oha && typeof oha.resolveDirectMediaUrl === 'function') {
-                        finalUrl = await oha.resolveDirectMediaUrl(rawHosterUrl, 'de');
-                    }
+                    finalUrl = await resolveDirectMediaUrl(rawHosterUrl, 'de');
                 } catch (e) {
-                    console.error('[S.TO] Oha.resolveDirectMediaUrl failed:', e && e.message);
+                    console.error('[S.TO] resolveDirectMediaUrl failed:', e && e.message);
                 }
 
                 var hostDomain = 'Server';
