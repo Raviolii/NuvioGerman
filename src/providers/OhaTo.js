@@ -62,17 +62,23 @@ function extractDomain(url) {
     return 'Server';
 }
 
-// Standardizes miscellaneous Doodstream variations to the exact https://dood.yt/w/ID format
+// Standardizes miscellaneous Doodstream variations to the exact https://dood.yt/e/ID format
 function normalizeDoodUrl(url) {
     if (!url || typeof url !== 'string') return url;
-    
-    // Checks host against your comprehensive Doodstream pattern list
-    var isDood = url.match(/dood|do[0-9]go|doood|dooood|ds2play|ds2video|dsvplay|d0o0d|do0od|d0000d|d000d|myvidplay|vidply|all3do|doply|vide0|vvide0|d-s/i);
+
+    // Recognize many doodstream-like hosts and playmogo
+    var isDood = url.match(/dood|do[0-9]go|doood|dooood|ds2play|ds2video|dsvplay|d0o0d|do0od|d0000d|d000d|myvidplay|vidply|all3do|doply|vide0|vvide0|d-s|playmogo|playmogo.com/i);
     if (isDood) {
-        // Extracts the alphanumeric media ID out of paths like /d/ID, /e/ID, /w/ID or directly from raw pathing
+        // Handle playmogo specifically: /e/ID -> dood.yt/e/ID
+        var playmogoMatch = url.match(/playmogo\.com\/e\/([a-zA-Z0-9]+)/i);
+        if (playmogoMatch && playmogoMatch[1]) {
+            return 'https://dood.yt/e/' + playmogoMatch[1];
+        }
+
+        // Extract the alphanumeric media ID out of paths like /d/ID, /e/ID, /w/ID or directly from raw pathing
         var match = url.match(/\/[dew]\/([a-zA-Z0-9]+)/) || url.match(/\/([a-zA-Z0-9]+)(?:\?|$)/);
         if (match && match[1]) {
-            return 'https://dood.yt/w/' + match[1];
+            return 'https://dood.yt/e/' + match[1];
         }
     }
     return url;
@@ -88,7 +94,7 @@ function normalizeVoeUrl(url) {
     if (isVoeMirror) {
         var match = url.match(/(?:\/voe)?\/([a-zA-Z0-9]+)(?:\?|$)/);
         if (match && match[1]) {
-            return 'https://voe.sx/' + match[1];
+            return 'https://voe.sx/e/' + match[1];
         }
     }
     return url;
@@ -443,4 +449,4 @@ function getStreams(tmdbId, type, season, episode) {
         });
 }
 
-module.exports = { getStreams };
+module.exports = { getStreams, resolveDirectMediaUrl, normalizeDoodUrl, normalizeVoeUrl };
