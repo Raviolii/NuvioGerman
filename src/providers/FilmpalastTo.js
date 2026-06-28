@@ -521,7 +521,13 @@ async function getStreams(tmdbId, type, season, episode) {
                             item.meta.directStreamUrl = vid.streaming_url;
                             item.meta.directStreamSource = 'vidara';
                             item.meta.hostPage = urlStr;
-                            item.requestHeaders = Object.assign({}, item.requestHeaders || {}, { 'Origin': (new URL(urlStr)).origin });
+                            item.meta.originalUrl = item.url;
+                            item.url = vid.streaming_url;
+                            item.headers = Object.assign({}, item.headers || {}, {
+                                'User-Agent': DEFAULT_HEADERS['User-Agent'],
+                                'Referer': streamPageUrl.href,
+                                'Origin': (new URL(urlStr)).origin
+                            });
                             if (vid.title) {
                                 item.meta.title = item.meta.title || vid.title;
                             }
@@ -535,7 +541,13 @@ async function getStreams(tmdbId, type, season, episode) {
                             item.meta.directStreamUrl = vs.streaming_url;
                             item.meta.directStreamSource = 'vidsonic';
                             item.meta.hostPage = urlStr;
-                            item.requestHeaders = Object.assign({}, item.requestHeaders || {}, { 'Origin': (new URL(urlStr)).origin });
+                            item.meta.originalUrl = item.url;
+                            item.url = vs.streaming_url;
+                            item.headers = Object.assign({}, item.headers || {}, {
+                                'User-Agent': DEFAULT_HEADERS['User-Agent'],
+                                'Referer': streamPageUrl.href,
+                                'Origin': (new URL(urlStr)).origin
+                            });
                             if (vs.title) {
                                 item.meta.title = item.meta.title || vs.title;
                             }
@@ -549,7 +561,13 @@ async function getStreams(tmdbId, type, season, episode) {
                             item.meta.directStreamUrl = voe.streaming_url;
                             item.meta.directStreamSource = 'voe';
                             item.meta.hostPage = urlStr;
-                            item.requestHeaders = Object.assign({}, item.requestHeaders || {}, { 'Origin': (new URL(urlStr)).origin });
+                            item.meta.originalUrl = item.url;
+                            item.url = voe.streaming_url;
+                            item.headers = Object.assign({}, item.headers || {}, {
+                                'User-Agent': DEFAULT_HEADERS['User-Agent'],
+                                'Referer': streamPageUrl.href,
+                                'Origin': (new URL(urlStr)).origin
+                            });
                             if (voe.title) item.meta.title = item.meta.title || voe.title;
                             if (voe.height) item.meta.height = item.meta.height || voe.height;
                             if (voe.size) item.meta.bytes = item.meta.bytes || voe.size;
