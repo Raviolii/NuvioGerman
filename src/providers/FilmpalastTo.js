@@ -426,15 +426,32 @@ async function getStreams(tmdbId, type, season, episode) {
         var $ = cheerio.load(html);
         var results = [];
 
+        function extractQuality(text) {
+            if (!text || typeof text !== 'string') return 'HD';
+            var q = text.match(/(\d{3,4}p|4k|uhd|hd|sd)/i);
+            return q ? q[0].toUpperCase() : 'HD';
+        }
+
         $('ul.currentStreamLinks').each(function(_i, streamBlock) {
-            var hostName = $(streamBlock).find('.hostName').text().trim();
+            var hostName = $(streamBlock).find('.hostName').text().trim() || 'Filmpalast';
             var title = season ? searchQuery : searchQuery;
 
             $(streamBlock).find('a[data-player-url]').each(function(_j, el) {
                 var playerUrl = $(el).attr('data-player-url');
+                var linkText = $(el).text();
+                var quality = extractQuality(linkText || hostName);
                 if (playerUrl && playerUrl.startsWith('http')) {
                     results.push({
+                        name: hostName + ' - ' + quality,
+                        title: hostName + ' - ' + quality,
+                        language: 'de',
+                        quality: quality,
                         url: playerUrl,
+                        headers: {
+                            'User-Agent': DEFAULT_HEADERS['User-Agent'],
+                            'Referer': streamPageUrl.href
+                        },
+                        provider: 'filmpalast',
                         meta: {
                             countryCodes: ['de'],
                             referer: streamPageUrl.href,
@@ -454,8 +471,19 @@ async function getStreams(tmdbId, type, season, episode) {
                 try {
                     var url = resolveHref(href, BASE_URL);
                     if (isStreamingHost(url.hostname)) {
+                        var linkText = $(el).text();
+                        var quality = extractQuality(linkText || hostName);
                         results.push({
+                            name: hostName + ' - ' + quality,
+                            title: hostName + ' - ' + quality,
+                            language: 'de',
+                            quality: quality,
                             url: url.href || String(url),
+                            headers: {
+                                'User-Agent': DEFAULT_HEADERS['User-Agent'],
+                                'Referer': streamPageUrl.href
+                            },
+                            provider: 'filmpalast',
                             meta: {
                                 countryCodes: ['de'],
                                 referer: streamPageUrl.href,
@@ -479,10 +507,12 @@ async function getStreams(tmdbId, type, season, episode) {
                     if (urlStr.indexOf('vidara') !== -1) {
                         var vid = await resolveVidaraPageToStream(urlStr);
                         if (vid && vid.streaming_url) {
-                            item.url = vid.streaming_url;
+                            item.meta = item.meta || {};
+                            item.meta.directStreamUrl = vid.streaming_url;
+                            item.meta.directStreamSource = 'vidara';
+                            item.meta.hostPage = urlStr;
                             item.requestHeaders = Object.assign({}, item.requestHeaders || {}, { 'Origin': (new URL(urlStr)).origin });
                             if (vid.title) {
-                                item.meta = item.meta || {};
                                 item.meta.title = item.meta.title || vid.title;
                             }
                         }
@@ -491,10 +521,12 @@ async function getStreams(tmdbId, type, season, episode) {
                     if (urlStr.indexOf('vidsonic') !== -1) {
                         var vs = await resolveVidsonicPageToStream(urlStr);
                         if (vs && vs.streaming_url) {
-                            item.url = vs.streaming_url;
+                            item.meta = item.meta || {};
+                            item.meta.directStreamUrl = vs.streaming_url;
+                            item.meta.directStreamSource = 'vidsonic';
+                            item.meta.hostPage = urlStr;
                             item.requestHeaders = Object.assign({}, item.requestHeaders || {}, { 'Origin': (new URL(urlStr)).origin });
                             if (vs.title) {
-                                item.meta = item.meta || {};
                                 item.meta.title = item.meta.title || vs.title;
                             }
                         }
@@ -503,9 +535,11 @@ async function getStreams(tmdbId, type, season, episode) {
                     if (urlStr.indexOf('voe') !== -1) {
                         var voe = await resolveVoePageToStream(urlStr);
                         if (voe && voe.streaming_url) {
-                            item.url = voe.streaming_url;
-                            item.requestHeaders = Object.assign({}, item.requestHeaders || {}, { 'Origin': (new URL(urlStr)).origin });
                             item.meta = item.meta || {};
+                            item.meta.directStreamUrl = voe.streaming_url;
+                            item.meta.directStreamSource = 'voe';
+                            item.meta.hostPage = urlStr;
+                            item.requestHeaders = Object.assign({}, item.requestHeaders || {}, { 'Origin': (new URL(urlStr)).origin });
                             if (voe.title) item.meta.title = item.meta.title || voe.title;
                             if (voe.height) item.meta.height = item.meta.height || voe.height;
                             if (voe.size) item.meta.bytes = item.meta.bytes || voe.size;
