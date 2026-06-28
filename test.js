@@ -36,6 +36,12 @@ async function start() {
     await runTest("Filmpalast", filmpalast, "931285", "movie");
 
     // ==========================================
+    // 1b. Test Filmpalast (Series)
+    // ID: 94997 - Season 1 Episode 1
+    // ==========================================
+    await runTest("Filmpalast (Series)", filmpalast, "94997", "series", 1, 1);
+
+    // ==========================================
     // 2. Test S.to (Series) - using TMDB id 931285 for consistency
     // ==========================================
     const theBoysTmdbId = "931285";

@@ -432,18 +432,27 @@ async function getStreams(tmdbId, type, season, episode) {
             return q ? q[0].toUpperCase() : 'HD';
         }
 
+        function formatDisplayName(hostName, quality) {
+            hostName = hostName || 'Filmpalast';
+            if (type === 'series' && season && episode) {
+                return `${hostName} (DE) - S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+            }
+            return `${hostName} - ${quality}`;
+        }
+
         $('ul.currentStreamLinks').each(function(_i, streamBlock) {
             var hostName = $(streamBlock).find('.hostName').text().trim() || 'Filmpalast';
-            var title = season ? searchQuery : searchQuery;
+            var title = searchQuery;
 
             $(streamBlock).find('a[data-player-url]').each(function(_j, el) {
                 var playerUrl = $(el).attr('data-player-url');
                 var linkText = $(el).text();
                 var quality = extractQuality(linkText || hostName);
+                var displayName = formatDisplayName(hostName, quality);
                 if (playerUrl && playerUrl.startsWith('http')) {
                     results.push({
-                        name: hostName + ' - ' + quality,
-                        title: hostName + ' - ' + quality,
+                        name: displayName,
+                        title: displayName,
                         language: 'de',
                         quality: quality,
                         url: playerUrl,
@@ -455,7 +464,7 @@ async function getStreams(tmdbId, type, season, episode) {
                         meta: {
                             countryCodes: ['de'],
                             referer: streamPageUrl.href,
-                            title: hostName + ' - ' + title,
+                            title: displayName,
                             sourceLabel: 'Filmpalast'
                         }
                     });
@@ -473,9 +482,10 @@ async function getStreams(tmdbId, type, season, episode) {
                     if (isStreamingHost(url.hostname)) {
                         var linkText = $(el).text();
                         var quality = extractQuality(linkText || hostName);
+                        var displayName = formatDisplayName(hostName, quality);
                         results.push({
-                            name: hostName + ' - ' + quality,
-                            title: hostName + ' - ' + quality,
+                            name: displayName,
+                            title: displayName,
                             language: 'de',
                             quality: quality,
                             url: url.href || String(url),
@@ -487,7 +497,7 @@ async function getStreams(tmdbId, type, season, episode) {
                             meta: {
                                 countryCodes: ['de'],
                                 referer: streamPageUrl.href,
-                                title: hostName + ' - ' + title,
+                                title: displayName,
                                 sourceLabel: 'Filmpalast'
                             }
                         });
