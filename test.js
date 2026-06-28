@@ -31,15 +31,14 @@ async function runTest(label, provider, id, type, season, episode) {
 async function start() {
     // ==========================================
     // 1. Test Filmpalast (Movie)
-    // ID: 1022789 (Example: Inside Out 2)
+    // ID: 931285 (Example: Inside Out 2)
     // ==========================================
-    await runTest("Filmpalast", filmpalast, "1022789", "movie");
+    await runTest("Filmpalast", filmpalast, "931285", "movie");
 
     // ==========================================
-    // 2. Test S.to (Series)
-    // ID: 76479 (The Boys - TMDB ID)
+    // 2. Test S.to (Series) - using TMDB id 931285 for consistency
     // ==========================================
-    const theBoysTmdbId = "76479"; 
+    const theBoysTmdbId = "931285";
     await runTest("S.to", sto, theBoysTmdbId, "series", 1, 1);
 
     // ==========================================
@@ -48,7 +47,7 @@ async function start() {
     // ==========================================
     console.log("\n--- Running Oha.to Tests ---");
     // Test Oha.to with a Movie (Inside Out 2)
-    await runTest("Oha.to (Movie)", ohato, "1022789", "movie");
+    await runTest("Oha.to (Movie)", ohato, "931285", "movie");
     
     // Test Oha.to with a Series (The Boys Season 1 Episode 1)
     await runTest("Oha.to (Series)", ohato, "76479", "series", 1, 1);
