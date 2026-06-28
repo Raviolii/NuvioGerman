@@ -25,40 +25,74 @@ function resolveHref(href, baseUrl) {
     return new URL(fullHref.startsWith('http') ? fullHref : baseUrl + fullHref);
 }
 
-async function fetchStreamPageUrl(searchQuery, season, episode) {
-    var searchUrl = new URL('/search/title/' + encodeURIComponent(season ? searchQuery : searchQuery), BASE_URL);
-    var response = await fetch(searchUrl.href, { headers: DEFAULT_HEADERS });
-    var html = await response.text();
-    var $ = cheerio.load(html);
-
-    var streamLinks = $('a[href*="/stream/"]')
-        .map(function(_i, el) {
-            return {
-                href: $(el).attr('href'),
-                title: $(el).attr('title') || $(el).text().trim()
-            };
-        })
-        .get();
-
-    if (!streamLinks.length) {
+function extractAutocompleteResult(candidates) {
+    if (Array.isArray(candidates)) {
+        for (var i = 0; i < candidates.length; i++) {
+            var item = candidates[i];
+            if (typeof item === 'string' && item.trim()) {
+                return item.trim();
+            }
+        }
         return undefined;
     }
 
-    if (!season) {
-        var yearMatch = streamLinks.find(function(link) {
-            return link.title && link.title.includes(String(episode || ''));
-        });
-        if (yearMatch) {
-            return resolveHref(yearMatch.href, BASE_URL);
+    if (candidates && typeof candidates === 'object') {
+        for (var key in candidates) {
+            var value = candidates[key];
+            if (typeof value === 'string' && value.trim()) {
+                return value.trim();
+            }
         }
     }
 
-    var firstLink = streamLinks[0];
-    if (!firstLink) {
+    return undefined;
+}
+
+async function fetchStreamPageUrl(searchQuery, type, season, episode) {
+    var autocompleteUrl = BASE_URL + '/autocomplete.php';
+    var formData = new URLSearchParams({ term: searchQuery });
+
+    var autocompleteResponse = await fetch(autocompleteUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            ...DEFAULT_HEADERS
+        },
+        body: formData.toString()
+    });
+
+    var candidates = await autocompleteResponse.json();
+    var searchResult = extractAutocompleteResult(candidates);
+    if (!searchResult) {
         return undefined;
     }
 
-    return resolveHref(firstLink.href, BASE_URL);
+    if (type === 'series' && season && episode) {
+        var seriesSlug = searchResult
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/(^-|-$)/g, '');
+
+        if (seriesSlug) {
+            return new URL(BASE_URL + '/stream/' + seriesSlug + '-s' + String(season).padStart(2, '0') + 'e' + String(episode).padStart(2, '0'));
+        }
+    }
+
+    var encodedSearchResult = encodeURIComponent(searchResult);
+    var searchPageUrl = BASE_URL + '/search/title/' + encodedSearchResult;
+    var searchPageResponse = await fetch(searchPageUrl, { headers: DEFAULT_HEADERS });
+    var searchPageHtml = await searchPageResponse.text();
+    var $ = cheerio.load(searchPageHtml);
+
+    var streamLink = $('a[href^="//filmpalast.to/stream/"]')
+        .first()
+        .attr('href');
+
+    if (streamLink) {
+        return resolveHref(streamLink, BASE_URL);
+    }
+
+    return undefined;
 }
 
 async function getStreams(tmdbId, type, season, episode) {
@@ -66,12 +100,10 @@ async function getStreams(tmdbId, type, season, episode) {
         return [];
     }
 
-    var searchQuery = season
-        ? tmdbId + ' S' + String(season).padStart(2, '0') + 'E' + String(episode || 1).padStart(2, '0')
-        : String(tmdbId);
+    var searchQuery = String(tmdbId);
 
     try {
-        var streamPageUrl = await fetchStreamPageUrl(searchQuery, season, episode);
+        var streamPageUrl = await fetchStreamPageUrl(searchQuery, type, season, episode);
         if (!streamPageUrl) {
             return [];
         }
