@@ -1,6 +1,9 @@
-var cheerio = require('cheerio');
+var cheerio = require('cheerio-without-node-native');
 
 var BASE_URL = 'https://filmpalast.to';
+
+// TMDB API key (falls back to `process.env.TMDB_API_KEY` if set)
+var TMDB_API_KEY = 'b1b501578f88cfaaaf0178b3d392ccf9';
 
 var DEFAULT_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -102,6 +105,25 @@ async function getStreams(tmdbId, type, season, episode) {
 
     var searchQuery = String(tmdbId);
 
+    // If a TMDB API key is provided and the id looks numeric, try to resolve to an IMDB id
+    try {
+        var tmdbKey = process.env.TMDB_API_KEY;
+        if (tmdbKey && /^\d+$/.test(searchQuery)) {
+            var tmdbBase = 'https://api.themoviedb.org/3';
+            var endpoint = type === 'series' ? '/tv/' : '/movie/';
+            var tmdbUrl = tmdbBase + endpoint + encodeURIComponent(searchQuery) + '/external_ids?api_key=' + tmdbKey;
+            var tmdbRes = await fetch(tmdbUrl);
+            if (tmdbRes && tmdbRes.ok) {
+                var tmdbData = await tmdbRes.json();
+                if (tmdbData && tmdbData.imdb_id) {
+                    searchQuery = tmdbData.imdb_id;
+                }
+            }
+        }
+    } catch (e) {
+        // Non-fatal: fall back to using the original tmdbId as search query
+    }
+
     try {
         var streamPageUrl = await fetchStreamPageUrl(searchQuery, type, season, episode);
         if (!streamPageUrl) {
@@ -143,7 +165,7 @@ async function getStreams(tmdbId, type, season, episode) {
                     var url = resolveHref(href, BASE_URL);
                     if (isStreamingHost(url.hostname)) {
                         results.push({
-                            url: url,
+                            url: url.href || String(url),
                             meta: {
                                 countryCodes: ['de'],
                                 referer: streamPageUrl.href,
