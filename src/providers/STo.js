@@ -219,7 +219,7 @@ function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
     });
 }
 
-var BASE_URL = 'https://s.to';
+var BASE_URL = 'https://serienstream.to';
 var TMDB_API_KEY = 'b1b501578f88cfaaaf0178b3d392ccf9';
 var TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
