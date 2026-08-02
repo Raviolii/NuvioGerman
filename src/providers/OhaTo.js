@@ -1,6 +1,6 @@
 /* istanbul ignore file */
 
-var cheerio = require('cheerio-without-node-native');
+var cheerio = require('cheerio');
 
 // TMDB API key (falls back to process.env.TMDB_API_KEY if set)
 var TMDB_API_KEY = 'b1b501578f88cfaaaf0178b3d392ccf9';
@@ -11,6 +11,189 @@ var DEFAULT_HEADERS = {
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
   'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
 };
+
+var STREAMING_HOSTS = [
+  'voe', 'dood', 'streamtape', 'veev', 'vidhide', 'dhtpre',
+  'mixdrop', 'supervideo', 'uqload', 'filelion', 'lulustream', 'fastream',
+  'dropload', 'savefiles', 'streamembed', 'vidara', 'vidsonic', 'firestream', 'vidmatrixa'
+];
+
+function isStreamingHost(hostname) {
+  return STREAMING_HOSTS.some(function(host) {
+    return hostname.includes(host);
+  });
+}
+
+async function getFinalRedirect(urlToFetch, referer) {
+  try {
+    var res = await fetch(urlToFetch, {
+      method: 'GET',
+      headers: Object.assign({}, DEFAULT_HEADERS, { 'Referer': referer }),
+      redirect: 'follow'
+    });
+    return res && res.url ? res.url : urlToFetch;
+  } catch (e) {
+    return urlToFetch;
+  }
+}
+
+async function resolveVidaraPageToStream(pageUrl) {
+  try {
+    var parsed = new URL(pageUrl);
+    var filecode = parsed.pathname.split('/').filter(Boolean).pop();
+    if (!filecode) return null;
+
+    var apiUrl = new URL('/api/stream', parsed.origin);
+    var res = await fetch(apiUrl.href, {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, DEFAULT_HEADERS),
+      body: JSON.stringify({ filecode: filecode, device: 'web' })
+    });
+
+    if (!res.ok) return null;
+    var data = await res.json();
+    if (data && data.streaming_url) {
+      return { streaming_url: data.streaming_url, title: data.title };
+    }
+  } catch (e) {
+    return null;
+  }
+  return null;
+}
+
+function decodeHexUrl(hexString) {
+  var joined = String(hexString || '').split('|').join('');
+  var decoded = '';
+  for (var i = 0; i < joined.length; i += 2) {
+    decoded += String.fromCharCode(parseInt(joined.substring(i, i + 2), 16));
+  }
+  return decoded.split('').reverse().join('');
+}
+
+async function resolveVidsonicPageToStream(pageUrl) {
+  try {
+    var pageRes = await fetch(pageUrl, { headers: DEFAULT_HEADERS });
+    if (!pageRes.ok) return null;
+    var html = await pageRes.text();
+    var $ = cheerio.load(html);
+    var title = $('title').text().trim().replace(/^Watch\s*/i, '').trim();
+
+    var hexMatch = html.match(/const _0x1\s*=\s*'([^']+)'/);
+    if (!hexMatch || !hexMatch[1]) return null;
+
+    var decoded = decodeHexUrl(hexMatch[1]);
+    try {
+      var m3u8 = new URL(decoded);
+      return { streaming_url: m3u8.href, title: title };
+    } catch (e) {
+      return null;
+    }
+  } catch (e) {
+    return null;
+  }
+}
+
+async function resolveFireStreamPageToStream(pageUrl) {
+  try {
+    var pageRes = await fetch(pageUrl, { headers: DEFAULT_HEADERS });
+    if (!pageRes.ok) return null;
+    var html = await pageRes.text();
+    var tokenMatch = html.match(/id="token-blob"[^>]*>([^<]+)/i);
+    if (!tokenMatch || !tokenMatch[1]) return null;
+
+    var ref = new URL(pageUrl).origin + '/';
+    var headers = Object.assign({}, DEFAULT_HEADERS, {
+      'Referer': ref,
+      'Origin': ref.replace(/\/$/, '')
+    });
+
+    var apiUrl = pageUrl.replace(/\/e\//i, '/api/videos/').replace(/\/v\//i, '/api/videos/').replace(/\/[^/]+$/i, '/resolve');
+    var apiPath = new URL(pageUrl).pathname;
+    var mediaId = apiPath.split('/').filter(Boolean).pop();
+    if (mediaId) {
+      apiUrl = 'https://firestream.to/api/videos/' + mediaId + '/resolve';
+    }
+
+    var apiRes = await fetch(apiUrl, {
+      method: 'POST',
+      headers: Object.assign({}, headers, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ blob: tokenMatch[1].trim() })
+    });
+
+    if (!apiRes.ok) return null;
+    var data = await apiRes.json();
+    if (data && data.signedVideoUrl) {
+      return {
+        streaming_url: data.signedVideoUrl,
+        title: data.title || 'FireStream',
+        headers: Object.assign({}, headers, { 'Referer': pageUrl })
+      };
+    }
+  } catch (e) {
+    return null;
+  }
+  return null;
+}
+
+async function resolveHostPageToDirectStream(pageUrl, referer) {
+  if (!pageUrl) return null;
+
+  var hostname = '';
+  try {
+    hostname = new URL(pageUrl).hostname.toLowerCase();
+  } catch (e) {
+    return null;
+  }
+
+  var baseHeaders = Object.assign({}, DEFAULT_HEADERS, { 'Referer': referer || pageUrl });
+
+  if (/vidara|vidmatrix/.test(hostname)) {
+    var vidara = await resolveVidaraPageToStream(pageUrl);
+    if (vidara && vidara.streaming_url) {
+      return { streaming_url: vidara.streaming_url, title: vidara.title, headers: Object.assign({}, baseHeaders, { 'Origin': new URL(pageUrl).origin }) };
+    }
+  }
+
+  if (/vidsonic/.test(hostname)) {
+    var vidsonic = await resolveVidsonicPageToStream(pageUrl);
+    if (vidsonic && vidsonic.streaming_url) {
+      return { streaming_url: vidsonic.streaming_url, title: vidsonic.title, headers: Object.assign({}, baseHeaders, { 'Origin': new URL(pageUrl).origin }) };
+    }
+  }
+
+  if (/firestream/.test(hostname)) {
+    var firestream = await resolveFireStreamPageToStream(pageUrl);
+    if (firestream && firestream.streaming_url) {
+      return { streaming_url: firestream.streaming_url, title: firestream.title, headers: firestream.headers || baseHeaders };
+    }
+  }
+
+  if (isVoeUrl(pageUrl)) {
+    var voe = await extractVoeStream(pageUrl, baseHeaders);
+    if (voe && voe.url) {
+      return {
+        streaming_url: voe.url,
+        title: voe.title || 'VOE Stream',
+        size: voe.size || 'Server',
+        headers: voe.headers || Object.assign({}, baseHeaders, { 'Referer': pageUrl })
+      };
+    }
+  }
+
+  if (/dood|do[0-9]go|doood|dooood|ds2play|ds2video|dsvplay|d0o0d|do0od|d0000d|d000d|myvidplay|vidply|all3do|doply|vide0|vvide0|d-s|playmogo|playmogo.com|doodstream/i.test(hostname)) {
+    var dood = await extractDoodStream(pageUrl, baseHeaders);
+    if (dood && dood.url) {
+      return {
+        streaming_url: dood.url,
+        title: dood.title || 'DoodStream',
+        size: dood.size || 'Server',
+        headers: dood.headers || Object.assign({}, baseHeaders, { 'Referer': pageUrl })
+      };
+    }
+  }
+
+  return null;
+}
 
 var VOE_DOMAINS = [
   'voe.sx','voe-unblock.com','voe-unblock.net','voeunblock.com','un-block-voe.net','voeunbl0ck.com','voeunblck.com','voeunblk.com','voe-un-block.com','jonathansociallike.com','voeun-block.net','v-o-e-unblock.com','edwardarriveoften.com','nathanfromsubject.com','audaciousdefaulthouse.com','launchreliantcleaverriver.com','kennethofficialitem.com','reputationsheriffkennethsand.com','fittingcentermondaysunday.com','lukecomparetwo.com','housecardsummerbutton.com','fraudclatterflyingcar.com','wolfdyslectic.com','bigclatterhomesguidesservice.com','uptodatefinishconferenceroom.com','jayservicestuff.com','realfinanceblogcenter.com','tinycat-voe-fashion.com','35volitantplimsoles5.com','20demidistance9elongations.com','telyn610zoanthropy.com','toxitabellaeatrebates306.com','greaseball6eventual20.com','745mingiestblissfully.com','19turanosephantasia.com','30sensualizeexpression.com','321naturelikefurfuroid.com','449unceremoniousnasoseptal.com','guidon40hyporadius9.com','cyamidpulverulence530.com','boonlessbestselling244.com','antecoxalbobbing1010.com','matriculant401merited.com','scatch176duplicities.com','availedsmallest.com','counterclockwisejacky.com','simpulumlamerop.com','paulkitchendark.com','metagnathtuggers.com','gamoneinterrupted.com','chromotypic.com','crownmakermacaronicism.com','generatesnitrosate.com','yodelswartlike.com','figeterpiazine.com','strawberriesporail.com','valeronevijao.com','timberwoodanotia.com','apinchcaseation.com','nectareousoverelate.com','nonesnanking.com','kathleenmemberhistory.com','stevenimaginelittle.com','jamiesamewalk.com','bradleyviewdoctor.com','sandrataxeight.com','graceaddresscommunity.com','shannonpersonalcost.com','cindyeyefinal.com','michaelapplysome.com','sethniceletter.com','brucevotewithin.com','rebeccaneverbase.com','loriwithinfamily.com','roberteachfinal.com','erikcoldperson.com','jasminetesttry.com','heatherdiscussionwhen.com','robertplacespace.com','alleneconomicmatter.com','josephseveralconcern.com','donaldlineelse.com','lisatrialidea.com','toddpartneranimal.com','jamessoundcost.com','brittneystandardwestern.com','sandratableother.com','robertordercharacter.com','maxfinishseveral.com','chuckle-tube.com','kristiesoundsimply.com','adrianmissionminute.com','richardsignfish.com','jennifercertaindevelopment.com','diananatureforeign.com','goofy-banana.com','mariatheserepublican.com','johnalwayssame.com','kellywhatcould.com','jilliandescribecompany.com','lukesitturn.com','mikaylaarealike.com','christopheruntilpoint.com','walterprettytheir.com','crystaltreatmenteast.com','lauradaydo.com','smoki.cc','lancewhosedifficult.com','ogladaj.me','dianaavoidthey.com','jefferycontrolmodel.com','marissasharecareer.com','charlestoughrace.com','ianrequireadult.com','timmaybealready.com','jessicayeahcatch.com','kinoger.ru'
@@ -186,13 +369,30 @@ async function extractVoeStream(urlStr, headers) {
   }
 }
 
+function normalizeMediaType(type) {
+  if (type === 'series' || type === 'show' || type === 'tv') return 'series';
+  return 'movie';
+}
+
+function isPlayableStreamUrl(urlStr) {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  var normalized = urlStr.trim();
+  if (!normalized.startsWith('http')) return false;
+  if (/\.m3u8(?:\?|#|$)/i.test(normalized)) return true;
+  if (/\.mp4(?:\?|#|$)/i.test(normalized)) return true;
+  if (/\.(?:m3u8|mp4)(?:[^\s]*)$/i.test(normalized)) return true;
+  if (/cloudwindow-route\.com|s1q2105\.com|video\.m3u8/i.test(normalized)) return true;
+  return false;
+}
+
 async function getTmdbMetadata(tmdbId, type) {
   try {
     if (!tmdbId) return null;
     var tmdbKey = TMDB_API_KEY || process.env.TMDB_API_KEY;
     if (!tmdbKey || !/^\d+$/.test(String(tmdbId))) return null;
 
-    var endpoints = type === 'series' ? ['/tv/', '/movie/'] : ['/movie/', '/tv/'];
+    var normalizedType = normalizeMediaType(type);
+    var endpoints = normalizedType === 'series' ? ['/tv/', '/movie/'] : ['/movie/', '/tv/'];
     var tmdbData = null;
 
     for (var i = 0; i < endpoints.length; i++) {
@@ -218,182 +418,159 @@ async function getTmdbMetadata(tmdbId, type) {
   }
 }
 
-const { ContentType } = require('stremio-addon-sdk');
-const { CountryCode } = require('../types');
-const { Fetcher, getTmdbId, Id } = require('../utils');
-const { Source } = require('./Source');
 
-class OhaTO extends Source {
-  constructor(fetcher) {
-    super();
-    this.id = 'ohato';
-    this.label = 'Oha.to';
-    this.baseUrl = 'https://oha.to';
+async function getStreams(tmdbId, type, season, episode, onResult) {
+  try {
+    if (!tmdbId) return [];
 
-    this.contentTypes = ['movie', 'series'];
-    this.countryCodes = [CountryCode.de];
-    this.priority = 1;
-
-    this.fetcher = fetcher;
-  }
-
-  async handleInternal(ctx, _type, id) {
-    const debug = process.env['DEBUG_OHATO'] === '1';
-
-    if (debug) console.log(`OhaTO: handleInternal called for id=${id}`);
-
-    const tmdbId = await getTmdbId(ctx, this.fetcher, id);
-
-    const sourcePayload = {
+    var normalizedType = normalizeMediaType(type);
+    var payload = {
       language: 'de',
       region: 'DE',
-      type: tmdbId && tmdbId.season ? 'series' : 'movie',
-      ids: { tmdb_id: String(tmdbId.id) },
-      name: '',
-      ...(tmdbId && tmdbId.season ? { episode: { ids: {}, season: tmdbId.season, episode: tmdbId.episode ?? 1 } } : {}),
+      type: normalizedType === 'series' ? 'series' : 'movie',
+      ids: { tmdb_id: String(tmdbId) },
+      name: ''
     };
+    if (season != null) payload.episode = { ids: {}, season: season, episode: episode != null ? episode : 1 };
 
-    const parseHeightFromString = (text) => {
-      if (!text && text !== 0) return undefined;
-      if (typeof text === 'number') return text;
-      const s = String(text);
-      const m = s.match(/(\d{3,4})p/i);
-      if (m) return parseInt(m[1], 10);
-      const m2 = s.match(/(\d{3,4})x(\d{3,4})/i);
-      if (m2) return parseInt(m2[2], 10);
-      const m3 = s.match(/(\d{3,4})/);
-      if (m3) return parseInt(m3[1], 10);
-      if (/4k/i.test(s)) return 2160;
-      if (/fhd|1080/i.test(s)) return 1080;
-      if (/hd/i.test(s)) return 720;
-      return undefined;
-    };
-
-    const qualityFromHeight = (h) => {
-      if (!h && h !== 0) return undefined;
-      if (h >= 2160) return '4K';
-      if (h >= 1080) return '1080p';
-      if (h >= 720) return '720p';
-      if (h >= 480) return '480p';
-      return undefined;
-    };
-
-    const OHA_SOURCE_URL = 'https://oha.to/mediaurl-source.json';
-
-    let finalData;
+    var finalData;
     try {
-      if (debug) console.log(`OhaTO: posting to ${OHA_SOURCE_URL}`);
-      finalData = await this.fetcher.json(ctx, new URL(OHA_SOURCE_URL), {
+      var res = await fetch('https://oha.to/mediaurl-source.json', {
         method: 'POST',
-        data: JSON.stringify(sourcePayload),
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
           'Accept': 'application/json,text/plain,*/*',
           'Accept-Language': 'de-DE,de;q=0.9',
           'Origin': 'https://oha.to',
           'Referer': 'https://oha.to/',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+          'User-Agent': DEFAULT_HEADERS['User-Agent']
         },
+        body: JSON.stringify(payload)
       });
+      if (!res.ok) return [];
+      finalData = await res.json();
     } catch (e) {
-      if (debug) console.log('OhaTO: source request failed', (e && e.message) || e);
       return [];
     }
 
-    const candidates = Array.isArray(finalData)
-      ? finalData
-      : (finalData && (finalData.streams || finalData.sources || finalData.items)) || [];
+    var candidates = Array.isArray(finalData) ? finalData : (finalData && (finalData.streams || finalData.sources || finalData.items)) || [];
+    var results = [];
 
-    const results = [];
+    // Optional TMDB metadata for nicer titles
+    var tmdbMeta = null;
+    try { tmdbMeta = await getTmdbMetadata(tmdbId, normalizedType); } catch (e) { tmdbMeta = null; }
 
-    // Fetch TMDB metadata (optional) to improve titles like SerienStream provider
-    let tmdbMeta = null;
-    try {
-      if (tmdbId && tmdbId.id) tmdbMeta = await getTmdbMetadata(tmdbId.id, sourcePayload.type);
-    } catch (e) {}
+    function mapLanguage(label) {
+      var l = (label || '').toLowerCase();
+      if (l.indexOf('deutsch') === 0 || l === 'de' || l.indexOf('german') === 0) return 'de';
+      if (l.indexOf('engl') === 0 || l === 'en' || l.indexOf('english') === 0) return 'en';
+      if (l.indexOf('fra') === 0 || l === 'fr' || l.indexOf('french') === 0) return 'fr';
+      return l.substr(0,2) || 'de';
+    }
 
-    for (const s of candidates) {
-      const urlStr = s && (s.url || s.file || s.source || s.stream);
-      if (!urlStr) continue;
+    var candidatePromises = candidates.map(async function(s) {
+      if (!s || s.type !== 'url') return null;
+
+      var urlStr = s && s.url;
+      if (!urlStr || typeof urlStr !== 'string') return null;
 
       try {
-        let url = new URL(String(urlStr));
-        let language;
-        if (Array.isArray(s.languages) && s.languages[0]) {
-          language = String(s.languages[0]).toLowerCase();
-        } else if (s.language || s.lang) {
-          language = String(s.language || s.lang).toLowerCase();
-        } else {
-          language = 'de';
-        }
+        var url = new URL(String(urlStr));
+        var language = 'de';
+        if (Array.isArray(s.languages) && s.languages[0]) language = String(s.languages[0]).toLowerCase();
+        else if (s.language || s.lang) language = String(s.language || s.lang).toLowerCase();
+        var langCode = mapLanguage(language);
+        if (langCode !== 'de') return null;
 
-        if (language !== 'de') continue;
+        var height = (function(text) {
+          if (!text && text !== 0) return undefined;
+          if (typeof text === 'number') return text;
+          var str = String(text);
+          var m = str.match(/(\d{3,4})p/i);
+          if (m) return parseInt(m[1], 10);
+          var m2 = str.match(/(\d{3,4})x(\d{3,4})/i);
+          if (m2) return parseInt(m2[2], 10);
+          var m3 = str.match(/(\d{3,4})/);
+          if (m3) return parseInt(m3[1], 10);
+          if (/4k/i.test(str)) return 2160;
+          if (/fhd|1080/i.test(str)) return 1080;
+          if (/hd/i.test(str)) return 720;
+          return undefined;
+        })(s.height || s.resolution || s.res || s.quality || s.tag || (Array.isArray(s.qualities) ? s.qualities[0] : undefined) || s.name || s.title);
 
-        const height = parseHeightFromString(
-          s.height || s.resolution || s.res || s.quality || s.tag
-          || (Array.isArray(s.qualities) ? s.qualities[0] : undefined) || s.name || s.title,
-        );
-        const quality = qualityFromHeight(height) || (s.quality || s.tag || (Array.isArray(s.qualities) ? s.qualities[0] : undefined));
+        var quality = (function(h) {
+          if (!h && h !== 0) return undefined;
+          if (h >= 2160) return '4K';
+          if (h >= 1080) return '1080p';
+          if (h >= 720) return '720p';
+          if (h >= 480) return '480p';
+          return undefined;
+        })(height) || (s.quality || s.tag || (Array.isArray(s.qualities) ? s.qualities[0] : undefined));
 
-        if (debug) console.log(`OhaTO: candidate ${url.href} lang=${language} height=${height || 'unknown'}`);
+        var title = (s && s.name) || (tmdbMeta && tmdbMeta.title) || '';
+        if (title) title = ('' + title).trim() + ' [' + (langCode ? langCode.toUpperCase() : 'DE') + ']';
 
-        const meta = {
-          countryCodes: [CountryCode.de],
-          language,
-          referer: this.baseUrl,
-          title: `${(s && s.name) || (tmdbMeta && tmdbMeta.title) || ''} [${language.toUpperCase()}]`.trim(),
-          sourceLabel: this.label,
+        var meta = {
+          countryCodes: ['de'],
+          language: langCode,
+          referer: 'https://oha.to/',
+          title: title,
+          sourceLabel: 'Oha.to'
         };
         if (quality) meta.quality = quality;
         if (height) meta.height = height;
 
-        // If the host is DoodStream or VOE, attempt to resolve to direct stream URL and headers
-        let headersObj = undefined;
-        let finalUrl = url.href;
-        try {
-          const doodRegex = /dood|do[0-9]go|doood|dooood|ds2play|ds2video|dsvplay|d0o0d|do0od|d0000d|d000d|myvidplay|vidply|all3do|doply|vide0|vvide0|d-s|playmogo|playmogo.com|doodstream/i;
-          const isDood = doodRegex.test(finalUrl);
-          const isVoe = isVoeUrl(finalUrl);
+        var finalUrl = url.href;
+        var headersObj = Object.assign({}, DEFAULT_HEADERS, { 'Referer': 'https://oha.to/' });
+        var directHostResolution = null;
 
-          if (isDood) {
-            const doodResult = await extractDoodStream(finalUrl, Object.assign({}, DEFAULT_HEADERS, { 'Referer': this.baseUrl }));
-            if (doodResult && doodResult.url) {
-              finalUrl = doodResult.url;
-              headersObj = doodResult.headers;
-              if (doodResult.title && !meta.title) meta.title = doodResult.title;
-            }
-          } else if (isVoe) {
-            const voeResult = await extractVoeStream(finalUrl, Object.assign({}, DEFAULT_HEADERS, { 'Referer': this.baseUrl }));
-            if (voeResult && voeResult.url) {
-              finalUrl = voeResult.url;
-              headersObj = voeResult.headers;
-              if (voeResult.title && !meta.title) meta.title = voeResult.title;
+        if (!isPlayableStreamUrl(finalUrl)) {
+          var redirectedUrl = await getFinalRedirect(finalUrl, 'https://oha.to/');
+          if (redirectedUrl && redirectedUrl !== finalUrl) {
+            finalUrl = redirectedUrl;
+          }
+
+          if (!isPlayableStreamUrl(finalUrl)) {
+            directHostResolution = await resolveHostPageToDirectStream(finalUrl, 'https://oha.to/');
+            if (directHostResolution && directHostResolution.streaming_url) {
+              finalUrl = directHostResolution.streaming_url;
+              headersObj = directHostResolution.headers || headersObj;
+              if (directHostResolution.title && !meta.title) meta.title = directHostResolution.title;
+              if (directHostResolution.size) meta.size = directHostResolution.size;
             }
           }
-        } catch (e) {
-          // ignore extraction errors and fall back to original URL
         }
 
-        // push result; include headers at top-level if available
-        try {
-          const finalUrlObj = new URL(String(finalUrl));
-          if (headersObj) {
-            results.push({ url: finalUrlObj, meta, headers: headersObj });
-          } else {
-            results.push({ url: finalUrlObj, meta });
-          }
-        } catch (e) {
-          // if final URL is not a valid absolute URL, push original url object
-          if (headersObj) results.push({ url, meta, headers: headersObj });
-          else results.push({ url, meta });
+        if (!isPlayableStreamUrl(finalUrl)) {
+          return null;
         }
+
+        var displayName = (s && s.name) ? (s.name + ' (' + (langCode ? langCode.toUpperCase() : 'DE') + ')') : (meta.title || 'Oha.to');
+
+        var streamObj = {
+          name: displayName,
+          title: displayName,
+          language: langCode,
+          quality: quality || 'HD',
+          url: finalUrl,
+          provider: 'ohato',
+          meta: meta
+        };
+        if (headersObj) streamObj.headers = headersObj;
+
+        try { if (typeof onResult === 'function') onResult(streamObj); } catch (e) {}
+        return streamObj;
       } catch (err) {
-        continue;
+        return null;
       }
-    }
+    });
 
-    return results;
+    var resolvedResults = await Promise.all(candidatePromises);
+    return resolvedResults.filter(Boolean);
+  } catch (e) {
+    return [];
   }
 }
 
-module.exports.OhaTO = OhaTO;
+module.exports = { getStreams };
+module.exports.getStreams = getStreams;
