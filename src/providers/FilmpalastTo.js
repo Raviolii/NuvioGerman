@@ -14,7 +14,7 @@ var DEFAULT_HEADERS = {
 var STREAMING_HOSTS = [
     'voe', 'dood', 'streamtape', 'veev', 'vinovo', 'vidhide', 'dhtpre',
     'mixdrop', 'supervideo', 'uqload', 'filelion', 'lulustream', 'fastream',
-    'dropload', 'savefiles', 'streamembed', 'vidara', 'vidsonic'
+    'dropload', 'savefiles', 'streamembed', 'vidara', 'vidsonic', 'firestream', 'vidmatrix'
 ];
 
 function isStreamingHost(hostname) {
@@ -85,6 +85,48 @@ async function resolveVidsonicPageToStream(pageUrl) {
     }
 }
 
+async function resolveFireStreamPageToStream(pageUrl) {
+    try {
+        var pageRes = await fetch(pageUrl, { headers: DEFAULT_HEADERS });
+        if (!pageRes.ok) return null;
+        var html = await pageRes.text();
+        var tokenMatch = html.match(/id="token-blob"[^>]*>([^<]+)/i);
+        if (!tokenMatch || !tokenMatch[1]) return null;
+
+        var ref = new URL(pageUrl).origin + '/';
+        var headers = Object.assign({}, DEFAULT_HEADERS, {
+            'Referer': ref,
+            'Origin': ref.replace(/\/$/, '')
+        });
+
+        var apiUrl = pageUrl.replace(/\/e\//i, '/api/videos/').replace(/\/v\//i, '/api/videos/').replace(/\/[^/]+$/i, '/resolve');
+        var apiPath = new URL(pageUrl).pathname;
+        var mediaId = apiPath.split('/').filter(Boolean).pop();
+        if (mediaId) {
+            apiUrl = 'https://firestream.to/api/videos/' + mediaId + '/resolve';
+        }
+
+        var apiRes = await fetch(apiUrl, {
+            method: 'POST',
+            headers: Object.assign({}, headers, { 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ blob: tokenMatch[1].trim() })
+        });
+
+        if (!apiRes.ok) return null;
+        var data = await apiRes.json();
+        if (data && data.signedVideoUrl) {
+            return {
+                streaming_url: data.signedVideoUrl,
+                title: data.title || 'FireStream',
+                headers: Object.assign({}, headers, { 'Referer': pageUrl })
+            };
+        }
+    } catch (e) {
+        return null;
+    }
+    return null;
+}
+
 function parseSizeToBytes(sizeStr) {
     if (!sizeStr) return null;
     var m = sizeStr.match(/([\d,.]+)\s*(GB|MB)/i);
@@ -96,293 +138,307 @@ function parseSizeToBytes(sizeStr) {
     return null;
 }
 
-async function resolveVoePageToStream(pageUrl) {
+var VOE_DOMAINS = [
+    'voe.sx', 'voe-unblock.com', 'voe-unblock.net', 'voeunblock.com', 'un-block-voe.net',
+    'voeunbl0ck.com', 'voeunblck.com', 'voeunblk.com', 'voe-un-block.com', 'jonathansociallike.com',
+    'voeun-block.net', 'v-o-e-unblock.com', 'edwardarriveoften.com', 'nathanfromsubject.com',
+    'audaciousdefaulthouse.com', 'launchreliantcleaverriver.com', 'kennethofficialitem.com',
+    'reputationsheriffkennethsand.com', 'fittingcentermondaysunday.com', 'lukecomparetwo.com',
+    'housecardsummerbutton.com', 'fraudclatterflyingcar.com', 'wolfdyslectic.com',
+    'bigclatterhomesguideservice.com', 'uptodatefinishconferenceroom.com', 'jayservicestuff.com',
+    'realfinanceblogcenter.com', 'tinycat-voe-fashion.com', '35volitantplimsoles5.com',
+    '20demidistance9elongations.com', 'telyn610zoanthropy.com', 'toxitabellaeatrebates306.com',
+    'greaseball6eventual20.com', '745mingiestblissfully.com', '19turanosephantasia.com',
+    '30sensualizeexpression.com', '321naturelikefurfuroid.com', '449unceremoniousnasoseptal.com',
+    'guidon40hyporadius9.com', 'cyamidpulverulence530.com', 'boonlessbestselling244.com',
+    'antecoxalbobbing1010.com', 'matriculant401merited.com', 'scatch176duplicities.com',
+    'availedsmallest.com', 'counterclockwisejacky.com', 'simpulumlamerop.com', 'paulkitchendark.com',
+    'metagnathtuggers.com', 'gamoneinterrupted.com', 'chromotypic.com', 'crownmakermacaronicism.com',
+    'generatesnitrosate.com', 'yodelswartlike.com', 'figeterpiazine.com', 'strawberriesporail.com',
+    'valeronevijao.com', 'timberwoodanotia.com', 'apinchcaseation.com', 'nectareousoverelate.com',
+    'nonesnanking.com', 'kathleenmemberhistory.com', 'stevenimaginelittle.com', 'jamiesamewalk.com',
+    'bradleyviewdoctor.com', 'sandrataxeight.com', 'graceaddresscommunity.com', 'shannonpersonalcost.com',
+    'cindyeyefinal.com', 'michaelapplysome.com', 'sethniceletter.com', 'brucevotewithin.com',
+    'rebeccaneverbase.com', 'loriwithinfamily.com', 'roberteachfinal.com', 'erikcoldperson.com',
+    'jasminetesttry.com', 'heatherdiscussionwhen.com', 'robertplacespace.com', 'alleneconomicmatter.com',
+    'josephseveralconcern.com', 'donaldlineelse.com', 'lisatrialidea.com', 'toddpartneranimal.com',
+    'jamessoundcost.com', 'brittneystandardwestern.com', 'sandratableother.com', 'robertordercharacter.com',
+    'maxfinishseveral.com', 'chuckle-tube.com', 'kristiesoundsimply.com', 'adrianmissionminute.com',
+    'richardsignfish.com', 'jennifercertaindevelopment.com', 'diananatureforeign.com', 'goofy-banana.com',
+    'mariatheserepublican.com', 'johnalwayssame.com', 'kellywhatcould.com', 'jilliandescribecompany.com',
+    'lukesitturn.com', 'mikaylaarealike.com', 'christopheruntilpoint.com', 'walterprettytheir.com',
+    'crystaltreatmenteast.com', 'lauradaydo.com', 'smoki.cc', 'lancewhosedifficult.com',
+    'ogladaj.me', 'dianaavoidthey.com', 'jefferycontrolmodel.com', 'marissasharecareer.com',
+    'charlestoughrace.com', 'ianrequireadult.com', 'timmaybealready.com', 'jessicayeahcatch.com',
+    'kinoger.ru'
+];
+
+function isVoeUrl(urlStr) {
     try {
-        var pageRes = await fetch(pageUrl, { headers: DEFAULT_HEADERS });
-        if (!pageRes.ok) return null;
-        var html = await pageRes.text();
-        var $ = cheerio.load(html);
+        var parsed = new URL(urlStr);
+        return parsed.host.indexOf('voe') !== -1 || VOE_DOMAINS.indexOf(parsed.host) !== -1;
+    } catch (e) {
+        return /voe/i.test(urlStr);
+    }
+}
 
-        var title = $('title').text().trim() || $('meta[name="description"]').attr('content') || '';
+function decodeBase64Utf8(value) {
+    try {
+        if (!value) return '';
+        if (typeof globalThis.atob === 'function') {
+            return globalThis.atob(value);
+        }
+        if (typeof Buffer !== 'undefined' && Buffer.from) {
+            return Buffer.from(value, 'base64').toString('utf8');
+        }
 
-        // Follow simple JS redirects: window.location.href = '...'
-        var redirectMatch = html.match(/window\.location\.href\s*=\s*'([^']+)'/);
-        while (redirectMatch && redirectMatch[1]) {
-            try {
-                var redirected = redirectMatch[1];
-                var redirectedRes = await fetch(redirected, { headers: DEFAULT_HEADERS });
-                if (!redirectedRes.ok) break;
-                html = await redirectedRes.text();
-                redirectMatch = html.match(/window\.location\.href\s*=\s*'([^']+)'/);
-            } catch (e) {
+        var base64 = String(value).replace(/[^A-Za-z0-9+/=]/g, '');
+        var padding = (4 - (base64.length % 4)) % 4;
+        base64 += '='.repeat(padding);
+
+        var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+        var lookup = {};
+        for (var i = 0; i < alphabet.length; i++) {
+            lookup[alphabet.charAt(i)] = i;
+        }
+
+        var bytes = [];
+        for (var i = 0; i < base64.length; i += 4) {
+            var a = lookup[base64.charAt(i)] >>> 0;
+            var b = lookup[base64.charAt(i + 1)] >>> 0;
+            var c = lookup[base64.charAt(i + 2)] >>> 0;
+            var d = lookup[base64.charAt(i + 3)] >>> 0;
+
+            bytes.push((a << 2) | (b >> 4));
+            if (base64.charAt(i + 2) !== '=') {
+                bytes.push(((b & 15) << 4) | (c >> 2));
+            }
+            if (base64.charAt(i + 3) !== '=') {
+                bytes.push(((c & 3) << 6) | d);
+            }
+        }
+
+        if (typeof TextDecoder !== 'undefined') {
+            return new TextDecoder('utf-8').decode(new Uint8Array(bytes));
+        }
+
+        return String.fromCharCode.apply(null, bytes);
+    } catch (e) {
+        return '';
+    }
+}
+
+function voeDecode(ct, luts) {
+    try {
+        var lutMatches = luts.slice(2, -2).split("','");
+        var lut = lutMatches.map(function(i) {
+            return i.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        });
+
+        var txt = '';
+        for (var i = 0; i < ct.length; i++) {
+            var x = ct.charCodeAt(i);
+            if (x > 64 && x < 91) {
+                x = (x - 52) % 26 + 65;
+            } else if (x > 96 && x < 123) {
+                x = (x - 84) % 26 + 97;
+            }
+            txt += String.fromCharCode(x);
+        }
+
+        for (var j = 0; j < lut.length; j++) {
+            var regex = new RegExp(lut[j], 'g');
+            txt = txt.replace(regex, '');
+        }
+
+        var decodedB64 = decodeBase64Utf8(txt);
+        var shifted = '';
+        for (var k = 0; k < decodedB64.length; k++) {
+            shifted += String.fromCharCode(decodedB64.charCodeAt(k) - 3);
+        }
+
+        var reversedB64 = shifted.split('').reverse().join('');
+        var finalJsonStr = decodeBase64Utf8(reversedB64);
+        return JSON.parse(finalJsonStr);
+    } catch (e) {
+        return null;
+    }
+}
+
+async function extractVoeStream(urlStr, headers) {
+    try {
+        var webUrl = urlStr;
+        var res = await fetch(webUrl, { headers: headers });
+        var html = await res.text();
+
+        while (html.indexOf('const currentUrl') !== -1 || /window\.location\.href\s*=\s*'([^']+)'/.test(html)) {
+            var rMatch = html.match(/window\.location\.href\s*=\s*'([^']+)'/);
+            if (rMatch && rMatch[1]) {
+                webUrl = rMatch[1];
+                res = await fetch(webUrl, { headers: headers });
+                html = await res.text();
+            } else {
                 break;
             }
         }
 
-        // Attempt ResolveURL-style JSON/script decoding
-        var jsonScriptMatch = html.match(/json">\["([^\"]+)"]<\/script>\s*<script\s*src="([^\"]+)/i);
-        if (jsonScriptMatch) {
-            try {
-                var ct = jsonScriptMatch[1];
-                var scriptPart = jsonScriptMatch[2];
-                var scriptUrl = new URL(scriptPart, pageUrl).href;
-                var html2res = await fetch(scriptUrl, { headers: DEFAULT_HEADERS });
-                if (html2res && html2res.ok) {
-                    var html2 = await html2res.text();
-                    var repl = html2.match(/(\[(?:'\W{2}'[,\]]){1,9})/);
-                    if (repl && repl[1]) {
-                        var s = null;
-                        try {
-                            s = voe_decode(ct, repl[1]);
-                        } catch (e) {
-                            s = null;
-                        }
+        var jsonMatch = html.match(/json">\["([^"]+)"\]<\/script>\s*<script\s*src="([^"]+)"/);
+        if (jsonMatch) {
+            var jsUrl = new URL(jsonMatch[2], webUrl).href;
+            var jsRes = await fetch(jsUrl, { headers: headers });
+            var jsHtml = await jsRes.text();
 
-                        if (s) {
-                            // Collect candidate URLs from common keys and nested structures
-                            var candidates = [];
-                            var tryAdd = function(u) {
-                                if (!u) return;
-                                if (typeof u !== 'string') return;
-                                var cand = u;
-                                if (cand.startsWith('//')) cand = 'https:' + cand;
-                                else if (cand.startsWith('/')) cand = (new URL(pageUrl)).origin + cand;
-                                else if (!cand.match(/^https?:\/\//)) {
-                                    try { cand = new URL(cand, pageUrl).href; } catch (e) { /* leave as-is */ }
-                                }
-                                if (cand.indexOf('http') === 0 || cand.indexOf('.m3u8') !== -1) {
-                                    if (candidates.indexOf(cand) === -1) candidates.push(cand);
-                                }
-                            };
-
-                            ['file', 'source', 'direct_access_url'].forEach(function(k) {
-                                if (s[k]) {
-                                    if (typeof s[k] === 'string') tryAdd(s[k]);
-                                    else if (typeof s[k] === 'object') {
-                                        for (var kk in s[k]) tryAdd(s[k][kk]);
-                                    }
-                                }
-                            });
-
-                            // Also scan top-level object fields for string urls
-                            for (var pk in s) {
-                                if (typeof s[pk] === 'string') tryAdd(s[pk]);
-                                else if (typeof s[pk] === 'object') {
-                                    for (var q in s[pk]) tryAdd(s[pk][q]);
-                                }
-                            }
-
-                            // Prefer direct m3u8 links
-                            var m3u8c = candidates.filter(function(u) { return u.toLowerCase().indexOf('.m3u8') !== -1; });
-                            var chosen = null;
-                            if (m3u8c.length) {
-                                chosen = m3u8c[0];
-                            } else {
-                                // Probe candidates: fetch and look for #EXTM3U or m3u8 content-type
-                                    for (var ci = 0; ci < candidates.length; ci++) {
-                                    var cand = candidates[ci];
-                                    try {
-                                            var probeRes = await fetch(cand, { headers: Object.assign({}, DEFAULT_HEADERS, { 'Referer': pageUrl, 'Origin': (new URL(pageUrl)).origin }) });
-                                        if (!probeRes.ok) continue;
-                                        var ctype = (probeRes.headers && probeRes.headers.get && probeRes.headers.get('content-type')) || '';
-                                        var body = await probeRes.text();
-                                        if (ctype.indexOf('mpegurl') !== -1 || body.indexOf('#EXTM3U') !== -1 || body.indexOf('#EXTINF') !== -1) {
-                                            // If the response is a playlist or contains HLS markers, use it
-                                            chosen = cand;
-                                            break;
-                                        }
-                                        // If the fetched HTML contains an m3u8 link, extract and resolve it
-                                        var innerM3u8 = body.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/i);
-                                        if (innerM3u8 && innerM3u8[0]) {
-                                            try { chosen = new URL(innerM3u8[0], cand).href; break; } catch (e) { chosen = innerM3u8[0]; break; }
-                                        }
-                                    } catch (e) {
-                                        // ignore probe errors
-                                    }
-                                }
-                            }
-
-                            if (chosen) {
-                                var sizeMatch = html.match(/[\d,.]+\s*(?:GB|MB)/i);
-                                var size = sizeMatch ? parseSizeToBytes(sizeMatch[0]) : null;
-                                var heightMatch = html.match(/(\d{3,4})p/);
-                                var height = heightMatch ? parseInt(heightMatch[1], 10) : undefined;
-                                return { streaming_url: chosen, title: title, height: height, size: size };
-                            }
-                        }
+            var replMatch = jsHtml.match(/(\[(?:'\W{2}'[,\]]){1,9})/);
+            if (replMatch) {
+                var sObj = voeDecode(jsonMatch[1], replMatch[1]);
+                if (sObj) {
+                    var candidateUrl = sObj.file || sObj.source || sObj.direct_access_url;
+                    if (candidateUrl) {
+                        return {
+                            url: candidateUrl,
+                            title: sObj.title || 'VOE Stream',
+                            size: 'Server',
+                            headers: Object.assign({}, headers, { 'Referer': webUrl })
+                        };
                     }
                 }
-            } catch (e) {
-                // fall through to other extraction methods
             }
         }
 
-            // If ResolveURL-style decoding didn't find anything, try scanning all external scripts
-            try {
-                var scriptSrcMatches = html.match(/<script[^>]+src=["']([^"']+)["'][^>]*>/ig) || [];
-                for (var si = 0; si < scriptSrcMatches.length; si++) {
-                    try {
-                        var m = scriptSrcMatches[si].match(/src=["']([^"']+)["']/i);
-                        if (!m || !m[1]) continue;
-                        var scrUrl = new URL(m[1], pageUrl).href;
-                        var scrRes = await fetch(scrUrl, { headers: DEFAULT_HEADERS });
-                        if (!scrRes || !scrRes.ok) continue;
-                        var scrText = await scrRes.text();
-                        // try to find the LUT pattern and any ct candidate in page html
-                        var repl2 = scrText.match(/(\[(?:'[^']+'[,\]]){1,12})/);
-                        var ctCandidates = [];
-                        var ct1 = html.match(/json">\["([^\"]{40,})/i);
-                        if (ct1 && ct1[1]) ctCandidates.push(ct1[1]);
-                        var ct2 = html.match(/var\s+ct\s*=\s*'([^']+)'/i);
-                        if (ct2 && ct2[1]) ctCandidates.push(ct2[1]);
-                        var ct3 = html.match(/data-ct=["']([^"']+)["']/i);
-                        if (ct3 && ct3[1]) ctCandidates.push(ct3[1]);
-                        // also search script text for a long base64-like chunk
-                        var ct4 = scrText.match(/([A-Za-z0-9+/=]{60,})/);
-                        if (ct4 && ct4[1]) ctCandidates.push(ct4[1]);
-
-                        if (repl2 && repl2[1] && ctCandidates.length) {
-                            for (var cti = 0; cti < ctCandidates.length; cti++) {
-                                try {
-                                    var s2 = voe_decode(ctCandidates[cti], repl2[1]);
-                                    if (!s2) continue;
-                                    var candList = [];
-                                    ['file','source','direct_access_url'].forEach(function(k){ if (s2[k]) { if (typeof s2[k] === 'string') candList.push(s2[k]); else if (typeof s2[k] === 'object') for (var kk in s2[k]) candList.push(s2[k][kk]); }});
-                                    for (var xi=0; xi<candList.length; xi++) {
-                                        var u = candList[xi];
-                                        if (!u) continue;
-                                        try { u = new URL(u, pageUrl).href; } catch(e){}
-                                        if (u && u.toLowerCase().indexOf('.m3u8') !== -1) return { streaming_url: u, title: title };
-                                    }
-                                } catch (e) { }
-                            }
-                        }
-                    } catch (e) { /* ignore script fetch errors */ }
-                }
-            } catch (e) { /* ignore */ }
-
-        // Fallback: try to scrape .m3u8 or JS vars
-        var m3u8Match = html.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/i);
-        var streaming = null;
+        var m3u8Match = html.match(/https?:\/\/[^"'\s]+\.m3u8(?:\?[^"'\s]*)?/i);
         if (m3u8Match && m3u8Match[0]) {
-            streaming = m3u8Match[0];
-        } else {
-            var fileMatch = html.match(/file\s*:\s*\"([^\"]+\.m3u8[^\"]*)\"/i) || html.match(/source\s*:\s*'([^']+\.m3u8[^']*)'/i) || html.match(/hls\s*[:=]\s*\"([^\"]+)\"/i);
-            if (fileMatch && fileMatch[1]) streaming = fileMatch[1];
+            return {
+                url: m3u8Match[0],
+                title: 'VOE Stream',
+                size: 'Server',
+                headers: Object.assign({}, headers, { 'Referer': webUrl })
+            };
         }
 
-        if (!streaming) return null;
+        var hlsMatch = html.match(/hls['"]\s*:\s*['"]([^'"]+)['"]/);
+        if (hlsMatch && hlsMatch[1]) {
+            return {
+                url: hlsMatch[1],
+                title: 'VOE Stream',
+                size: 'Server',
+                headers: Object.assign({}, headers, { 'Referer': webUrl })
+            };
+        }
 
-        var sizeMatch2 = html.match(/[\d,.]+\s*(?:GB|MB)/i);
-        var size2 = sizeMatch2 ? parseSizeToBytes(sizeMatch2[0]) : null;
-        var heightMatch2 = html.match(/(\d{3,4})p/);
-        var height2 = heightMatch2 ? parseInt(heightMatch2[1], 10) : undefined;
-
-        return { streaming_url: streaming, title: title, height: height2, size: size2 };
+        return {
+            url: webUrl,
+            title: 'VOE Stream',
+            size: 'Server',
+            headers: headers
+        };
     } catch (e) {
         return null;
     }
 }
 
-function voe_decode(ct, luts) {
+async function resolveVoePageToStream(pageUrl) {
     try {
-        // Build LUT array similar to ResolveURL implementation
-        var inner = luts.slice(2, -2);
-        var parts = inner.split("','");
-        var lut = parts.map(function(i) {
-            return i.split('').map(function(x) {
-                return " .*+?^${}()|[]\\".indexOf(x) !== -1 ? ('\\' + x) : x;
-            }).join('');
-        });
-
-        var txt = '';
-        for (var idx = 0; idx < ct.length; idx++) {
-            var x = ct.charCodeAt(idx);
-            if (64 < x && x < 91) x = (x - 52) % 26 + 65;
-            else if (96 < x && x < 123) x = (x - 84) % 26 + 97;
-            txt += String.fromCharCode(x);
-        }
-
-        for (var ii = 0; ii < lut.length; ii++) {
-            try { txt = txt.replace(new RegExp(lut[ii], 'g'), ''); } catch (e) { /* ignore */ }
-        }
-
-        var b1 = Buffer.from(txt, 'base64').toString('latin1');
-        var shifted = '';
-        for (var j = 0; j < b1.length; j++) shifted += String.fromCharCode(b1.charCodeAt(j) - 3);
-        var rev = shifted.split('').reverse().join('');
-        var decoded = Buffer.from(rev, 'base64').toString('utf8');
-        return JSON.parse(decoded);
+        if (!isVoeUrl(pageUrl)) return null;
+        var voe = await extractVoeStream(pageUrl, Object.assign({}, DEFAULT_HEADERS, { 'Referer': pageUrl }));
+        if (!voe || !voe.url) return null;
+        return {
+            streaming_url: voe.url,
+            title: voe.title || 'VOE Stream',
+            size: voe.size || 'Server',
+            headers: voe.headers || Object.assign({}, DEFAULT_HEADERS, { 'Referer': pageUrl })
+        };
     } catch (e) {
         return null;
     }
 }
 
-function extractAutocompleteResult(candidates) {
-    if (Array.isArray(candidates)) {
-        for (var i = 0; i < candidates.length; i++) {
-            var item = candidates[i];
-            if (typeof item === 'string' && item.trim()) {
-                return item.trim();
-            }
-        }
-        return undefined;
-    }
+async function getTmdbMetadata(tmdbId, type) {
+    try {
+        if (!tmdbId) return null;
+        var tmdbKey = TMDB_API_KEY || process.env.TMDB_API_KEY;
+        if (!tmdbKey || !/^\d+$/.test(String(tmdbId))) return null;
 
-    if (candidates && typeof candidates === 'object') {
-        for (var key in candidates) {
-            var value = candidates[key];
-            if (typeof value === 'string' && value.trim()) {
-                return value.trim();
-            }
-        }
-    }
+        var endpoints = type === 'series' ? ['/tv/', '/movie/'] : ['/movie/', '/tv/'];
+        var tmdbData = null;
 
-    return undefined;
+        for (var i = 0; i < endpoints.length; i++) {
+            var endpoint = endpoints[i];
+            var tmdbUrl = 'https://api.themoviedb.org/3' + endpoint + encodeURIComponent(String(tmdbId)) + '?api_key=' + tmdbKey + '&language=de-DE';
+            var tmdbRes = await fetch(tmdbUrl);
+            if (!tmdbRes || !tmdbRes.ok) continue;
+
+            tmdbData = await tmdbRes.json();
+            if (tmdbData && (tmdbData.title || tmdbData.name)) break;
+        }
+
+        if (!tmdbData) return null;
+
+        var title = tmdbData.title || tmdbData.name || '';
+        var year = '';
+        var releaseDate = tmdbData.release_date || tmdbData.first_air_date || '';
+        if (releaseDate && releaseDate.length >= 4) year = releaseDate.substring(0, 4);
+
+        if (!title) return null;
+        return { title: title, year: year, mediaType: tmdbData.release_date ? 'movie' : (tmdbData.first_air_date ? 'series' : (type === 'series' ? 'series' : 'movie')) };
+    } catch (e) {
+        return null;
+    }
 }
 
-async function fetchStreamPageUrl(searchQuery, type, season, episode) {
-    var autocompleteUrl = BASE_URL + '/autocomplete.php';
-    var formData = new URLSearchParams({ term: searchQuery });
+async function fetchStreamPageUrl(searchQuery, type, season, episode, year, mediaType) {
+    if (!searchQuery) return undefined;
 
-    var autocompleteResponse = await fetch(autocompleteUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            ...DEFAULT_HEADERS
-        },
-        body: formData.toString()
-    });
+    var query = String(searchQuery).trim();
+    var effectiveMediaType = mediaType || type;
+    var searchQueries = [];
 
-    var candidates = await autocompleteResponse.json();
-    var searchResult = extractAutocompleteResult(candidates);
-    if (!searchResult) {
-        return undefined;
-    }
-
-    if (type === 'series' && season && episode) {
-        var seriesSlug = searchResult
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/(^-|-$)/g, '');
-
-        if (seriesSlug) {
-            return new URL(BASE_URL + '/stream/' + seriesSlug + '-s' + String(season).padStart(2, '0') + 'e' + String(episode).padStart(2, '0'));
+    if (effectiveMediaType === 'series' && season && episode) {
+        searchQueries.push(query + ' S' + String(season).padStart(2, '0') + 'E' + String(episode).padStart(2, '0'));
+        searchQueries.push(query);
+    } else {
+        searchQueries.push(query);
+        if (year) {
+            searchQueries.push(query + ' ' + String(year));
         }
     }
 
-    var encodedSearchResult = encodeURIComponent(searchResult);
-    var searchPageUrl = BASE_URL + '/search/title/' + encodedSearchResult;
-    var searchPageResponse = await fetch(searchPageUrl, { headers: DEFAULT_HEADERS });
-    var searchPageHtml = await searchPageResponse.text();
-    var $ = cheerio.load(searchPageHtml);
+    for (var i = 0; i < searchQueries.length; i++) {
+        var candidateQuery = searchQueries[i];
+        var encodedSearchQuery = encodeURIComponent(candidateQuery);
+        var searchPageUrl = BASE_URL + '/search/title/' + encodedSearchQuery;
+        var searchPageResponse = await fetch(searchPageUrl, { headers: DEFAULT_HEADERS });
+        if (!searchPageResponse || !searchPageResponse.ok) continue;
 
-    var streamLink = $('a[href^="//filmpalast.to/stream/"]')
-        .first()
-        .attr('href');
+        var searchPageHtml = await searchPageResponse.text();
+        var $ = cheerio.load(searchPageHtml);
 
-    if (streamLink) {
-        return resolveHref(streamLink, BASE_URL);
+        var streamLinks = $('a[href*="/stream/"]')
+            .map(function(_i, el) {
+                var href = $(el).attr('href');
+                var title = ($(el).attr('title') || $(el).text().trim() || '').trim();
+                if (!href) return null;
+                return {
+                    href: href,
+                    title: title
+                };
+            })
+            .get()
+            .filter(function(item) { return !!item; });
+
+        if (!streamLinks.length) continue;
+
+        if (!season) {
+            var yearMatch = streamLinks.find(function(link) {
+                return link.title && new RegExp(String(year || ''), 'i').test(link.title);
+            });
+            if (yearMatch) {
+                return resolveHref(yearMatch.href, BASE_URL);
+            }
+        }
+
+        var firstLink = streamLinks[0];
+        if (!firstLink) continue;
+        return resolveHref(firstLink.href, BASE_URL);
     }
 
     return undefined;
@@ -393,29 +449,23 @@ async function getStreams(tmdbId, type, season, episode) {
         return [];
     }
 
-    var searchQuery = String(tmdbId);
+    var searchTitle = String(tmdbId);
+    var searchYear = '';
+    var searchMediaType = type;
 
-    // Optionally convert numeric TMDB id to IMDb id when an API key is available
     try {
-        var tmdbKey = TMDB_API_KEY || process.env.TMDB_API_KEY;
-        if (tmdbKey && /^\d+$/.test(searchQuery)) {
-            var tmdbBase = 'https://api.themoviedb.org/3';
-            var endpoint = type === 'series' ? '/tv/' : '/movie/';
-            var tmdbUrl = tmdbBase + endpoint + encodeURIComponent(searchQuery) + '/external_ids?api_key=' + tmdbKey;
-            var tmdbRes = await fetch(tmdbUrl);
-            if (tmdbRes && tmdbRes.ok) {
-                var tmdbData = await tmdbRes.json();
-                if (tmdbData && tmdbData.imdb_id) {
-                    searchQuery = tmdbData.imdb_id;
-                }
-            }
+        var metadata = await getTmdbMetadata(tmdbId, type);
+        if (metadata && metadata.title) {
+            searchTitle = metadata.title;
+            searchYear = metadata.year || '';
+            searchMediaType = metadata.mediaType || type;
         }
     } catch (e) {
-        // Non-fatal: continue using original tmdb id
+        // Non-fatal: continue with the fallback query
     }
 
     try {
-        var streamPageUrl = await fetchStreamPageUrl(searchQuery, type, season, episode);
+        var streamPageUrl = await fetchStreamPageUrl(searchTitle, type, season, episode, searchYear, searchMediaType);
         if (!streamPageUrl) {
             return [];
         }
@@ -442,7 +492,7 @@ async function getStreams(tmdbId, type, season, episode) {
 
         $('ul.currentStreamLinks').each(function(_i, streamBlock) {
             var hostName = $(streamBlock).find('.hostName').text().trim() || 'Filmpalast';
-            var title = searchQuery;
+            var title = searchTitle;
 
             $(streamBlock).find('a[data-player-url]').each(function(_j, el) {
                 var playerUrl = $(el).attr('data-player-url');
@@ -514,7 +564,7 @@ async function getStreams(tmdbId, type, season, episode) {
                     var urlStr = item && (typeof item.url === 'string' ? item.url : (item.url && item.url.href));
                     if (!urlStr) return;
 
-                    if (urlStr.indexOf('vidara') !== -1) {
+                    if (urlStr.indexOf('vidara') !== -1 || urlStr.indexOf('vidmatrix') !== -1) {
                         var vid = await resolveVidaraPageToStream(urlStr);
                         if (vid && vid.streaming_url) {
                             item.meta = item.meta || {};
@@ -571,6 +621,24 @@ async function getStreams(tmdbId, type, season, episode) {
                             if (voe.title) item.meta.title = item.meta.title || voe.title;
                             if (voe.height) item.meta.height = item.meta.height || voe.height;
                             if (voe.size) item.meta.bytes = item.meta.bytes || voe.size;
+                        }
+                    }
+
+                    if (urlStr.indexOf('firestream') !== -1) {
+                        var fire = await resolveFireStreamPageToStream(urlStr);
+                        if (fire && fire.streaming_url) {
+                            item.meta = item.meta || {};
+                            item.meta.directStreamUrl = fire.streaming_url;
+                            item.meta.directStreamSource = 'firestream';
+                            item.meta.hostPage = urlStr;
+                            item.meta.originalUrl = item.url;
+                            item.url = fire.streaming_url;
+                            item.headers = Object.assign({}, item.headers || {}, {
+                                'User-Agent': DEFAULT_HEADERS['User-Agent'],
+                                'Referer': streamPageUrl.href,
+                                'Origin': (new URL(urlStr)).origin
+                            }, fire.headers || {});
+                            if (fire.title) item.meta.title = item.meta.title || fire.title;
                         }
                     }
                 } catch (e) {
