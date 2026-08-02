@@ -374,17 +374,6 @@ function normalizeMediaType(type) {
   return 'movie';
 }
 
-function isPlayableStreamUrl(urlStr) {
-  if (!urlStr || typeof urlStr !== 'string') return false;
-  var normalized = urlStr.trim();
-  if (!normalized.startsWith('http')) return false;
-  if (/\.m3u8(?:\?|#|$)/i.test(normalized)) return true;
-  if (/\.mp4(?:\?|#|$)/i.test(normalized)) return true;
-  if (/\.(?:m3u8|mp4)(?:[^\s]*)$/i.test(normalized)) return true;
-  if (/cloudwindow-route\.com|s1q2105\.com|video\.m3u8/i.test(normalized)) return true;
-  return false;
-}
-
 async function getTmdbMetadata(tmdbId, type) {
   try {
     if (!tmdbId) return null;
@@ -522,28 +511,6 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
 
         var finalUrl = url.href;
         var headersObj = Object.assign({}, DEFAULT_HEADERS, { 'Referer': 'https://oha.to/' });
-        var directHostResolution = null;
-
-        if (!isPlayableStreamUrl(finalUrl)) {
-          var redirectedUrl = await getFinalRedirect(finalUrl, 'https://oha.to/');
-          if (redirectedUrl && redirectedUrl !== finalUrl) {
-            finalUrl = redirectedUrl;
-          }
-
-          if (!isPlayableStreamUrl(finalUrl)) {
-            directHostResolution = await resolveHostPageToDirectStream(finalUrl, 'https://oha.to/');
-            if (directHostResolution && directHostResolution.streaming_url) {
-              finalUrl = directHostResolution.streaming_url;
-              headersObj = directHostResolution.headers || headersObj;
-              if (directHostResolution.title && !meta.title) meta.title = directHostResolution.title;
-              if (directHostResolution.size) meta.size = directHostResolution.size;
-            }
-          }
-        }
-
-        if (!isPlayableStreamUrl(finalUrl)) {
-          return null;
-        }
 
         var displayName = (s && s.name) ? (s.name + ' (' + (langCode ? langCode.toUpperCase() : 'DE') + ')') : (meta.title || 'Oha.to');
 
