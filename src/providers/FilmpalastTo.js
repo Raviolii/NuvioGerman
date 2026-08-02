@@ -14,7 +14,7 @@ var DEFAULT_HEADERS = {
 var STREAMING_HOSTS = [
     'voe', 'dood', 'streamtape', 'veev', 'vinovo', 'vidhide', 'dhtpre',
     'mixdrop', 'supervideo', 'uqload', 'filelion', 'lulustream', 'fastream',
-    'dropload', 'savefiles', 'streamembed', 'vidara', 'vidsonic', 'firestream', 'vidmatrix'
+    'dropload', 'savefiles', 'streamembed', 'vidara', 'vidsonic', 'firestream', 'vidmatrixa'
 ];
 
 function isStreamingHost(hostname) {
@@ -564,7 +564,7 @@ async function getStreams(tmdbId, type, season, episode) {
                     var urlStr = item && (typeof item.url === 'string' ? item.url : (item.url && item.url.href));
                     if (!urlStr) return;
 
-                    if (urlStr.indexOf('vidara') !== -1 || urlStr.indexOf('vidmatrix') !== -1) {
+                    if (urlStr.indexOf('vidara') !== -1 || urlStr.indexOf('vidmatrix') !== -1 || urlStr.indexOf('vidmatrixa') !== -1) {
                         var vid = await resolveVidaraPageToStream(urlStr);
                         if (vid && vid.streaming_url) {
                             item.meta = item.meta || {};
