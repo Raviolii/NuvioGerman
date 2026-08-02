@@ -1,8 +1,5 @@
 var cheerio = require('cheerio-without-node-native');
 
-// NOTE: Plugin environments may not allow requiring other provider files.
-// Inline a minimal subset of OhaTo helpers here so `S.to` works standalone.
-
 function extractDomain(url) {
     if (!url || typeof url !== 'string') return 'Server';
     var matches = url.match(/^https?:\/\/([^/?#]+)(?:[/?#]|$)/i);
@@ -11,34 +8,73 @@ function extractDomain(url) {
     return 'Server';
 }
 
+// ==========================================
+// DOODSTREAM EXTRACTOR LOGIC (Standalone)
+// ==========================================
 function normalizeDoodUrl(url) {
     if (!url || typeof url !== 'string') return url;
     var isDood = url.match(/dood|do[0-9]go|doood|dooood|ds2play|ds2video|dsvplay|d0o0d|do0od|d0000d|d000d|myvidplay|vidply|all3do|doply|vide0|vvide0|d-s|playmogo|playmogo.com/i);
     if (isDood) {
         var playmogoMatch = url.match(/playmogo\.com\/e\/([a-zA-Z0-9]+)/i);
-        if (playmogoMatch && playmogoMatch[1]) return 'https://dood.yt/e/' + playmogoMatch[1];
+        if (playmogoMatch && playmogoMatch[1]) return 'https://dood.to/e/' + playmogoMatch[1];
         var match = url.match(/\/[dew]\/([a-zA-Z0-9]+)/) || url.match(/\/([a-zA-Z0-9]+)(?:\?|$)/);
-        if (match && match[1]) return 'https://dood.yt/e/' + match[1];
+        if (match && match[1]) return 'https://dood.to/e/' + match[1];
     }
     return url;
 }
 
-function normalizeVoeUrl(url) {
-    if (!url || typeof url !== 'string') return url;
-    var host = extractDomain(url);
-    var isVoe = url.indexOf('voe') !== -1; // simple heuristic
-    if (isVoe) {
-        var match = url.match(/(?:\/voe)?\/([a-zA-Z0-9]+)(?:\?|$)/);
-        if (match && match[1]) return 'https://voe.sx/e/' + match[1];
+async function extractDoodStream(urlStr, headers) {
+    try {
+        var url = new URL(normalizeDoodUrl(urlStr));
+        var res = await fetch(url.href, { headers: headers });
+        var html = await res.text();
+
+        if (/Video not found/.test(html)) {
+            throw new Error('Video not found');
+        }
+
+        var $ = cheerio.load(html);
+        var title = $('title').text().trim().replace(/ - DoodStream$/, '').trim();
+
+        var downloadUrl = url.href.replace('/e/', '/d/');
+        var downloadRes = await fetch(downloadUrl, { headers: headers });
+        var downloadHtml = await downloadRes.text();
+        var sizeMatch = downloadHtml.match(/([\d.]+ ?[GM]B)/);
+
+        var passMatch = html.match(/\/pass_md5\/([a-zA-Z0-9\/\-_]+)/);
+        if (passMatch) {
+            var passUrl = 'https://' + url.hostname + passMatch[0];
+            var tokenRes = await fetch(passUrl, { headers: Object.assign({}, headers, { 'Referer': url.href }) });
+            var tokenText = await tokenRes.text();
+            if (tokenText) {
+                var randomToken = '' + Math.random().toString(36).substring(2);
+                var directStreamUrl = tokenText + 'zplain?token=' + randomToken + '&expiry=' + Date.now();
+                return {
+                    url: directStreamUrl,
+                    title: title || 'DoodStream',
+                    size: sizeMatch ? sizeMatch[1] : 'Server',
+                    headers: Object.assign({}, headers, { 'Referer': 'https://' + url.hostname + '/' })
+                };
+            }
+        }
+
+        return {
+            url: url.href,
+            title: title || 'DoodStream',
+            size: sizeMatch ? sizeMatch[1] : 'Server',
+            headers: headers
+        };
+    } catch (e) {
+        console.error('[DoodStream] Extraction failed:', e.message);
+        return null;
     }
-    return url;
 }
 
-// VOE mirrors list and full Oha-like resolver logic (inlined)
-var LOKKE_PING_URL = 'https://www.lokke.app/api/app/ping';
-var OHA_RESOLVE_URL = 'https://oha.to/web-vod/mediaurl-resolve.json';
-
-var VOE_MIRRORS = [
+// ==========================================
+// VOE EXTRACTOR LOGIC (Standalone)
+// ==========================================
+var VOE_DOMAINS = [
+    'voe.sx',
     '19turanosephantasia.com', '20demidistance9elongations.com', '30sensualizeexpression.com',
     '321naturelikefurfuroid.com', '35volitantplimsoles5.com', '449unceremoniousnasoseptal.com',
     '745mingiestblissfully.com', 'adrianmissionminute.com', 'alleneconomicmatter.com',
@@ -74,149 +110,66 @@ var VOE_MIRRORS = [
     'walterprettytheir.com', 'wolfdyslectic.com', 'yodelswartlike.com'
 ];
 
-function getLokkeHandshakePayload() {
-    return {
-        token: 'VKm7XwPbumwb9aeGoVi1fHa6ut1v41a5s6t-yzVQ4qZfN-VwHrdLcD18xPpL4qdzY92xAJiWD_7UZshSngIn_GTbU1uPRTuGFqYQCOBkXzu9YOUPV-u-EbB1WaSZjd6srGhQ',
-        reason: 'app-blur',
-        locale: 'de',
-        theme: 'dark',
-        metadata: {
-            device: { 
-                type: 'Handset', 
-                brand: 'Apple', 
-                model: 'iPhone 15 Pro', 
-                name: 'iPhone', 
-                uniqueId: 'E9B56A1F-810A-4C23-9D22-C8542FBB0D1C' 
-            },
-            os: { name: 'ios', version: '18.7.7', abis: ['ARM64E'], host: 'unknown' },
-            app: { platform: 'ios', version: '1.0.2', buildId: '1.0.2', engine: 'jsc', installer: 'TestFlight' },
-            version: { package: 'app.lokke.main', binary: '1.0.2', js: '1.0.4' },
-        },
-        appFocusTime: 0,
-        playerActive: false,
-        playDuration: 0,
-        devMode: true,
-        hasAddon: true,
-        castConnected: false,
-        package: 'app.lokke.main',
-        version: '1.0.4',
-        process: 'app',
-        firstAppStart: Date.now(),
-        lastAppStart: Date.now(),
-        ipLocation: null,
-        adblockEnabled: true,
-        proxy: { supported: ['openvpn'], engine: 'openvpn', enabled: false, autoServer: true, id: 'fi-hel' },
-        iap: { supported: true, error: 'No in-app payment subscriptions found' }
-    };
-}
-
-function handleOhaTaskLoop(ohaResult, ohaHeaders) {
-    if (!ohaResult || ohaResult.kind !== 'taskRequest') {
-        return Promise.resolve(ohaResult);
+function isVoeUrl(urlStr) {
+    try {
+        var parsed = new URL(urlStr);
+        return parsed.host.indexOf('voe') !== -1 || VOE_DOMAINS.indexOf(parsed.host) !== -1;
+    } catch (e) {
+        return /voe/i.test(urlStr);
     }
-
-    var taskData = ohaResult.data || {};
-    var targetUrl = taskData.url;
-    var params = taskData.params || {};
-    var targetHeaders = params.headers || {};
-    var method = params.method || 'GET';
-
-    var requestHeaders = Object.assign({}, targetHeaders, {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7'
-    });
-
-    return fetch(targetUrl, {
-        method: method,
-        headers: requestHeaders
-    })
-    .then(function(clientRes) {
-        return clientRes.text().then(function(responseText) {
-            var responseHeaders = {};
-            if (typeof clientRes.headers.entries === 'function') {
-                for (var pair of clientRes.headers.entries()) {
-                    responseHeaders[pair[0]] = pair[1];
-                }
-            }
-
-            var taskResponsePayload = {
-                kind: "taskResponse",
-                id: ohaResult.id,
-                data: {
-                    type: "fetch",
-                    status: clientRes.status,
-                    url: clientRes.url,
-                    headers: responseHeaders,
-                    text: responseText
-                }
-            };
-
-            return fetch(OHA_RESOLVE_URL, {
-                method: 'POST',
-                headers: ohaHeaders,
-                body: JSON.stringify(taskResponsePayload)
-            });
-        });
-    })
-    .then(function(nextRes) { return nextRes.json(); })
-    .then(function(nextOhaResult) {
-        return handleOhaTaskLoop(nextOhaResult, ohaHeaders);
-    });
 }
 
-function resolveDirectMediaUrl(targetHostUrl, itemLanguage) {
-    var finalTargetUrl = normalizeDoodUrl(targetHostUrl);
-    finalTargetUrl = normalizeVoeUrl(finalTargetUrl);
+async function extractVoeStream(urlStr, headers) {
+    try {
+        var urlObj = new URL(urlStr);
+        var pathSegments = urlObj.pathname.replace(/\/+$/, '').split('/');
+        var fileId = pathSegments[pathSegments.length - 1];
+        var targetUrl = new URL('/e/' + fileId, urlObj.origin);
 
-    return fetch(LOKKE_PING_URL, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'Lokke/1.0.2 (iPhone; CPU iPhone OS 18_7_7 like Mac OS X)'
-        },
-        body: JSON.stringify(getLokkeHandshakePayload())
-    })
-    .then(function(res) { return res.json(); })
-    .then(function(lokkeData) {
-        var signature = lokkeData && lokkeData.addonSig;
-        if (!signature) throw new Error('OhaTo: Signature validation failed');
+        var res = await fetch(targetUrl.href, { headers: headers });
+        var html = await res.text();
 
-        var ohaHeaders = {
-            'Content-Type': 'application/json',
-            'mediaurl-signature': signature,
-            'User-Agent': 'MediaUrl/2',
-            'Accept-Language': 'de-DE,de;q=0.9',
-            'Accept': '*/*'
+        var redirectMatch = html.match(/window\.location\.href\s*=\s*'([^']+)/);
+        if (redirectMatch && redirectMatch[1]) {
+            return await extractVoeStream(redirectMatch[1], headers);
+        }
+
+        if (/An error occurred during encoding|Video not found/.test(html)) {
+            throw new Error('VOE Video not found');
+        }
+
+        var $ = cheerio.load(html);
+        var metaDesc = $('meta[name="description"]').attr('content') || '';
+        var title = metaDesc.trim().replace(/^Watch /, '').replace(/ at VOE$/, '').trim() || 'VOE Stream';
+
+        // Extract HLS stream script source (.m3u8 URL) from VOE source code
+        var hlsUrlMatch = html.match(/'hls'\s*:\s*'([^']+)'/) || html.match(/"hls"\s*:\s*"([^"]+)"/) || html.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/);
+        var streamUrl = hlsUrlMatch ? (hlsUrlMatch[1] || hlsUrlMatch[0]) : null;
+
+        // Fallback: search for direct source variables or script patterns if needed
+        if (!streamUrl) {
+            var scriptMatch = html.match(/sources\s*=\s*({[^}]+})/);
+            if (scriptMatch) {
+                try {
+                    var sources = JSON.parse(scriptMatch[1]);
+                    streamUrl = sources.hls || sources.file || sources.src;
+                } catch (e) {}
+            }
+        }
+
+        var sizeMatch = html.matchAll(/[\d.]+ ?[GM]B/g).toArray();
+        var sizeStr = sizeMatch.length > 0 ? sizeMatch[sizeMatch.length - 1][0] : 'Server';
+
+        return {
+            url: streamUrl || targetUrl.href,
+            title: title,
+            size: sizeStr,
+            headers: headers
         };
-
-        var ohaInputPayload = {
-            language: itemLanguage || 'de',
-            region: 'CH',
-            url: finalTargetUrl,
-            clientVersion: '3.0.2'
-        };
-
-        return fetch(OHA_RESOLVE_URL, {
-            method: 'POST',
-            headers: ohaHeaders,
-            body: JSON.stringify(ohaInputPayload)
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(initialOhaResult) {
-            return handleOhaTaskLoop(initialOhaResult, ohaHeaders);
-        });
-    })
-    .then(function(ohaResult) {
-        if (!ohaResult) return finalTargetUrl;
-        
-        var resolvedUrl = ohaResult.url || ohaResult.file || ohaResult.stream || 
-                          (ohaResult.streams && ohaResult.streams[0] && ohaResult.streams[0].url) || 
-                          (ohaResult.links && ohaResult.links[0]) || finalTargetUrl;
-        return resolvedUrl;
-    })
-    .catch(function() {
-        return finalTargetUrl;
-    });
+    } catch (e) {
+        console.error('[VOE] Extraction failed:', e.message);
+        return null;
+    }
 }
 
 var BASE_URL = 'https://serienstream.to';
@@ -229,9 +182,6 @@ var DEFAULT_HEADERS = {
     'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
 };
 
-// ==========================================
-// 1. REDIRECT HELPER
-// ==========================================
 async function getFinalRedirect(url, referer) {
     try {
         console.log(`[S.TO] Resolving redirect: ${url}`);
@@ -247,12 +197,7 @@ async function getFinalRedirect(url, referer) {
     }
 }
 
-// ==========================================
-// 2. MAIN FUNCTION
-// ==========================================
 async function getStreams(tmdbId, type, season, episode, onResult) {
-    // S.to ONLY supports series. 
-    // If 'movie' is passed, we exit early to prevent unnecessary API calls.
     if (type !== 'series' && type !== 'show' && type !== 'tv') {
         console.log(`[S.TO] Skip: Provider does not support type "${type}"`);
         return [];
@@ -262,8 +207,6 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
     console.log(`\n--- [S.TO] Search: TMDB ${tmdbId} | S${season}E${episode} ---`);
 
     try {
-        // Schritt A: IMDB-ID via TMDB API holen
-        // We use the /tv/ endpoint because S.to is a series provider
         var tmdbUrl = `${TMDB_BASE_URL}/tv/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`;
         
         console.log(`[S.TO] Fetching External IDs: ${tmdbUrl}`);
@@ -283,21 +226,17 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
         }
         console.log(`[S.TO] Found IMDB ID: ${imdbId}`);
 
-        // Schritt B: Suche auf s.to mit der IMDB-ID
         var searchUrl = `${BASE_URL}/suche?term=${imdbId}`;
         console.log(`[S.TO] Searching S.TO: ${searchUrl}`);
         var searchRes = await fetch(searchUrl, { headers: DEFAULT_HEADERS });
         var searchHtml = await searchRes.text();
         var $search = cheerio.load(searchHtml);
 
-        // Find the series link
         var relativeSeriesLink = $search('.col-6.col-md-4.col-lg-2 a.show-cover').attr('href');
         
         if (!relativeSeriesLink) {
-            // Check if we are already on the series page (sometimes search redirects directly)
             if (searchHtml.includes('series-title')) {
                 console.log("[S.TO] Search redirected directly to series page.");
-                // Extract path from the response URL
                 relativeSeriesLink = new URL(searchRes.url).pathname;
             } else {
                 console.warn("[S.TO] Series link not found in search results.");
@@ -305,7 +244,6 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
             }
         }
 
-        // Schritt C: Episoden-Seite aufrufen
         var targetUrl = `${BASE_URL}${relativeSeriesLink}/staffel-${season}/episode-${episode}`;
         console.log(`[S.TO] Navigating to: ${targetUrl}`);
         var epRes = await fetch(targetUrl, { headers: DEFAULT_HEADERS });
@@ -318,19 +256,8 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
         var epHtml = await epRes.text();
         var $ep = cheerio.load(epHtml);
 
-        // Schritt D: Deutsche Links extrahieren (data-language-id="1")
-        // Language IDs: 1 = German, 2 = English, 3 = German Subbed
         var linkBoxes = $ep('button.link-box[data-language-id="1"]').toArray();
         console.log(`[S.TO] Found ${linkBoxes.length} potential German streams.`);
-        
-        // Domains that should be rewritten to Dood format before resolving
-        function mapToDood(url) {
-            if (!url || typeof url !== 'string') return url;
-            // Playmogo often exposes Dood streams at /e/:id -> map to dood.yt/e/:id
-            var pm = url.match(/playmogo\.com\/e\/([a-zA-Z0-9]+)/i);
-            if (pm && pm[1]) return 'https://dood.yt/e/' + pm[1];
-            return url;
-        }
         
         for (var el of linkBoxes) {
             var playPath = $ep(el).attr('data-play-url');
@@ -350,33 +277,35 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
 
             if (!playPath) continue;
 
-            // Redirect auflösen
             var redirectUrl = BASE_URL + playPath;
             var rawHosterUrl = await getFinalRedirect(redirectUrl, targetUrl);
 
-            // Map certain host URLs to dood format first (Playmogo etc.)
-            rawHosterUrl = mapToDood(rawHosterUrl);
-
-            // Also normalize Voe mirrors to the consistent /e/ form using local helper
-            try {
-                rawHosterUrl = normalizeVoeUrl(rawHosterUrl);
-            } catch (e) {
-                console.error('[S.TO] Voe normalization failed:', e && e.message);
-            }
-
-            // Filter out internal s.to links that didn't resolve to a real hoster
             if (rawHosterUrl && !rawHosterUrl.includes('s.to/r/')) {
-                // Let Oha.to resolve direct media URLs and normalize hosts
                 var finalUrl = rawHosterUrl;
-                try {
-                    finalUrl = await resolveDirectMediaUrl(rawHosterUrl, 'de');
-                } catch (e) {
-                    console.error('[S.TO] resolveDirectMediaUrl failed:', e && e.message);
+                var sizeLabel = 'Server';
+
+                var isDood = /dood|do[0-9]go|doood|dooood|ds2play|ds2video|dsvplay|d0o0d|do0od|d0000d|d000d|myvidplay|vidply|all3do|doply|vide0|vvide0|d-s|playmogo|playmogo.com/i.test(rawHosterUrl);
+                var isVoe = isVoeUrl(rawHosterUrl);
+
+                if (isDood) {
+                    var doodResult = await extractDoodStream(rawHosterUrl, { 'Referer': targetUrl });
+                    if (doodResult) {
+                        finalUrl = doodResult.url;
+                        sizeLabel = doodResult.size;
+                    }
+                } else if (isVoe) {
+                    var voeResult = await extractVoeStream(rawHosterUrl, { 'Referer': targetUrl });
+                    if (voeResult) {
+                        finalUrl = voeResult.url;
+                        sizeLabel = voeResult.size;
+                    }
                 }
 
-                var hostDomain = 'Server';
+                var hostDomain = sizeLabel;
                 try {
-                    hostDomain = (new URL(finalUrl)).hostname.replace(/^www\./i, '');
+                    if (sizeLabel === 'Server' || sizeLabel.indexOf('GB') === -1 && sizeLabel.indexOf('MB') === -1) {
+                        hostDomain = (new URL(finalUrl)).hostname.replace(/^www\./i, '');
+                    }
                 } catch (e) {}
 
                 var displayLang = langCode ? langCode.toUpperCase() : (languageLabel || 'DE');
@@ -397,7 +326,6 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
                     provider: 'sto'
                 };
 
-                // Emit partial result immediately if caller provided a callback
                 try {
                     if (typeof onResult === 'function') onResult(streamObj);
                 } catch (e) {
