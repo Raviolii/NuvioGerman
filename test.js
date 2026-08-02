@@ -42,10 +42,10 @@ async function start() {
     await runTest("Filmpalast (Series)", filmpalast, "94997", "series", 2, 1);
 
     // ==========================================
-    // 2. Test S.to (Series) - using TMDB id 931285 for consistency
+    // 2. Test S.to (Series) - using The Boys TMDB ID
     // ==========================================
-    const theBoysTmdbId = "931285";
-    await runTest("S.to", sto, theBoysTmdbId, "series", 3, 1);
+    const theBoysTmdbId = "76479";
+    await runTest("S.to", sto, theBoysTmdbId, "series", 1, 1);
 
     // ==========================================
     // 3. Test Oha.to (Movie & Series)
