@@ -75,6 +75,7 @@ async function extractDoodStream(urlStr, headers) {
 // ==========================================
 var VOE_DOMAINS = [
     'voe.sx',
+    'jessicachoosemake.com',
     '19turanosephantasia.com', '20demidistance9elongations.com', '30sensualizeexpression.com',
     '321naturelikefurfuroid.com', '35volitantplimsoles5.com', '449unceremoniousnasoseptal.com',
     '745mingiestblissfully.com', 'adrianmissionminute.com', 'alleneconomicmatter.com',
@@ -142,11 +143,9 @@ async function extractVoeStream(urlStr, headers) {
         var metaDesc = $('meta[name="description"]').attr('content') || '';
         var title = metaDesc.trim().replace(/^Watch /, '').replace(/ at VOE$/, '').trim() || 'VOE Stream';
 
-        // Extract HLS stream script source (.m3u8 URL) from VOE source code
         var hlsUrlMatch = html.match(/'hls'\s*:\s*'([^']+)'/) || html.match(/"hls"\s*:\s*"([^"]+)"/) || html.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/);
         var streamUrl = hlsUrlMatch ? (hlsUrlMatch[1] || hlsUrlMatch[0]) : null;
 
-        // Fallback: search for direct source variables or script patterns if needed
         if (!streamUrl) {
             var scriptMatch = html.match(/sources\s*=\s*({[^}]+})/);
             if (scriptMatch) {
