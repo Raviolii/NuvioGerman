@@ -71,44 +71,41 @@ async function extractDoodStream(urlStr, headers) {
 }
 
 // ==========================================
-// VOE EXTRACTOR LOGIC (Standalone)
+// VOE EXTRACTOR LOGIC (Kodi ResolveURL Port)
 // ==========================================
 var VOE_DOMAINS = [
-    'voe.sx',
-    'jessicachoosemake.com',
-    '19turanosephantasia.com', '20demidistance9elongations.com', '30sensualizeexpression.com',
-    '321naturelikefurfuroid.com', '35volitantplimsoles5.com', '449unceremoniousnasoseptal.com',
-    '745mingiestblissfully.com', 'adrianmissionminute.com', 'alleneconomicmatter.com',
-    'antecoxalbobbing1010.com', 'apinchcaseation.com', 'audaciousdefaulthouse.com',
-    'availedsmallest.com', 'bigclatterhomesguideservice.com', 'boonlessbestselling244.com',
-    'bradleyviewdoctor.com', 'brittneystandardwestern.com', 'brucevotewithin.com',
-    'charlestoughrace.com', 'christopheruntilpoint.com', 'chromotypic.com',
-    'chuckle-tube.com', 'cindyeyefinal.com', 'counterclockwisejacky.com',
-    'crownmakermacaronicism.com', 'crystaltreatmenteast.com', 'cyamidpulverulence530.com',
-    'diananatureforeign.com', 'donaldlineelse.com', 'edwardarriveoften.com',
-    'erikcoldperson.com', 'figeterpiazine.com', 'fittingcentermondaysunday.com',
-    'fraudclatterflyingcar.com', 'gamoneinterrupted.com', 'generatesnitrosate.com',
-    'goofy-banana.com', 'graceaddresscommunity.com', 'greaseball6eventual20.com',
-    'guidon40hyporadius9.com', 'heatherdiscussionwhen.com', 'housecardsummerbutton.com',
-    'jamessoundcost.com', 'jamiesamewalk.com', 'jasminetesttry.com',
-    'jayservicestuff.com', 'jennifercertaindevelopment.com', 'jilliandescribecompany.com',
-    'johnalwayssame.com', 'jonathansociallike.com', 'josephseveralconcern.com',
-    'kathleenmemberhistory.com', 'kellywhatcould.com', 'kennethofficialitem.com',
-    'kinoger.ru', 'kristiesoundsimply.com', 'lancewhosedifficult.com',
-    'launchreliantcleaverriver.com', 'lauradaydo.com', 'lisatrialidea.com',
-    'loriwithinfamily.com', 'lukecomparetwo.com', 'lukesitturn.com',
-    'mariatheserepublican.com', 'matriculant401merited.com', 'maxfinishseveral.com',
-    'metagnathtuggers.com', 'michaelapplysome.com', 'mikaylaarealike.com',
-    'nathanfromsubject.com', 'nectareousoverelate.com', 'nonesnanking.com',
-    'paulkitchendark.com', 'realfinanceblogcenter.com', 'rebeccaneverbase.com',
-    'reputationsheriffkennethsand.com', 'richardsignfish.com', 'roberteachfinal.com',
-    'robertordercharacter.com', 'robertplacespace.com', 'sandratableother.com',
-    'sandrataxeight.com', 'scatch176duplicities.com', 'sethniceletter.com',
-    'shannonpersonalcost.com', 'simpulumlamerop.com', 'smoki.cc',
-    'stevenimaginelittle.com', 'strawberriesporail.com', 'telyn610zoanthropy.com',
-    'timberwoodanotia.com', 'toddpartneranimal.com', 'toxitabellaeatrebates306.com',
-    'uptodatefinishconferenceroom.com', 'v-o-e-unblock.com', 'valeronevijao.com',
-    'walterprettytheir.com', 'wolfdyslectic.com', 'yodelswartlike.com'
+    'voe.sx', 'voe-unblock.com', 'voe-unblock.net', 'voeunblock.com', 'un-block-voe.net',
+    'voeunbl0ck.com', 'voeunblck.com', 'voeunblk.com', 'voe-un-block.com', 'jonathansociallike.com',
+    'voeun-block.net', 'v-o-e-unblock.com', 'edwardarriveoften.com', 'nathanfromsubject.com',
+    'audaciousdefaulthouse.com', 'launchreliantcleaverriver.com', 'kennethofficialitem.com',
+    'reputationsheriffkennethsand.com', 'fittingcentermondaysunday.com', 'lukecomparetwo.com',
+    'housecardsummerbutton.com', 'fraudclatterflyingcar.com', 'wolfdyslectic.com',
+    'bigclatterhomesguideservice.com', 'uptodatefinishconferenceroom.com', 'jayservicestuff.com',
+    'realfinanceblogcenter.com', 'tinycat-voe-fashion.com', '35volitantplimsoles5.com',
+    '20demidistance9elongations.com', 'telyn610zoanthropy.com', 'toxitabellaeatrebates306.com',
+    'greaseball6eventual20.com', '745mingiestblissfully.com', '19turanosephantasia.com',
+    '30sensualizeexpression.com', '321naturelikefurfuroid.com', '449unceremoniousnasoseptal.com',
+    'guidon40hyporadius9.com', 'cyamidpulverulence530.com', 'boonlessbestselling244.com',
+    'antecoxalbobbing1010.com', 'matriculant401merited.com', 'scatch176duplicities.com',
+    'availedsmallest.com', 'counterclockwisejacky.com', 'simpulumlamerop.com', 'paulkitchendark.com',
+    'metagnathtuggers.com', 'gamoneinterrupted.com', 'chromotypic.com', 'crownmakermacaronicism.com',
+    'generatesnitrosate.com', 'yodelswartlike.com', 'figeterpiazine.com', 'strawberriesporail.com',
+    'valeronevijao.com', 'timberwoodanotia.com', 'apinchcaseation.com', 'nectareousoverelate.com',
+    'nonesnanking.com', 'kathleenmemberhistory.com', 'stevenimaginelittle.com', 'jamiesamewalk.com',
+    'bradleyviewdoctor.com', 'sandrataxeight.com', 'graceaddresscommunity.com', 'shannonpersonalcost.com',
+    'cindyeyefinal.com', 'michaelapplysome.com', 'sethniceletter.com', 'brucevotewithin.com',
+    'rebeccaneverbase.com', 'loriwithinfamily.com', 'roberteachfinal.com', 'erikcoldperson.com',
+    'jasminetesttry.com', 'heatherdiscussionwhen.com', 'robertplacespace.com', 'alleneconomicmatter.com',
+    'josephseveralconcern.com', 'donaldlineelse.com', 'lisatrialidea.com', 'toddpartneranimal.com',
+    'jamessoundcost.com', 'brittneystandardwestern.com', 'sandratableother.com', 'robertordercharacter.com',
+    'maxfinishseveral.com', 'chuckle-tube.com', 'kristiesoundsimply.com', 'adrianmissionminute.com',
+    'richardsignfish.com', 'jennifercertaindevelopment.com', 'diananatureforeign.com', 'goofy-banana.com',
+    'mariatheserepublican.com', 'johnalwayssame.com', 'kellywhatcould.com', 'jilliandescribecompany.com',
+    'lukesitturn.com', 'mikaylaarealike.com', 'christopheruntilpoint.com', 'walterprettytheir.com',
+    'crystaltreatmenteast.com', 'lauradaydo.com', 'smoki.cc', 'lancewhosedifficult.com',
+    'ogladaj.me', 'dianaavoidthey.com', 'jefferycontrolmodel.com', 'marissasharecareer.com',
+    'charlestoughrace.com', 'ianrequireadult.com', 'timmaybealready.com', 'jessicayeahcatch.com',
+    'kinoger.ru'
 ];
 
 function isVoeUrl(urlStr) {
@@ -120,49 +117,99 @@ function isVoeUrl(urlStr) {
     }
 }
 
+function voeDecode(ct, luts) {
+    try {
+        var lutMatches = luts.slice(2, -2).split("','");
+        var lut = lutMatches.map(function(i) {
+            return i.replace(/[\.*+?^${}()|[\]\\]/g, '\\$&');
+        });
+
+        var txt = '';
+        for (var i = 0; i < ct.length; i++) {
+            var x = ct.charCodeAt(i);
+            if (x > 64 && x < 91) {
+                x = (x - 52) % 26 + 65;
+            } else if (x > 96 && x < 123) {
+                x = (x - 84) % 26 + 97;
+            }
+            txt += String.fromCharCode(x);
+        }
+
+        for (var j = 0; j < lut.length; j++) {
+            var regex = new RegExp(lut[j], 'g');
+            txt = txt.replace(regex, '');
+        }
+
+        var decodedB64 = Buffer.from(txt, 'base64').toString('utf8');
+        var shifted = '';
+        for (var k = 0; k < decodedB64.length; k++) {
+            shifted += String.fromCharCode(decodedB64.charCodeAt(k) - 3);
+        }
+
+        var reversedB64 = shifted.split('').reverse().join('');
+        var finalJsonStr = Buffer.from(reversedB64, 'base64').toString('utf8');
+        return JSON.parse(finalJsonStr);
+    } catch (e) {
+        return null;
+    }
+}
+
 async function extractVoeStream(urlStr, headers) {
     try {
-        var urlObj = new URL(urlStr);
-        var pathSegments = urlObj.pathname.replace(/\/+$/, '').split('/');
-        var fileId = pathSegments[pathSegments.length - 1];
-        var targetUrl = new URL('/e/' + fileId, urlObj.origin);
-
-        var res = await fetch(targetUrl.href, { headers: headers });
+        var webUrl = urlStr;
+        var res = await fetch(webUrl, { headers: headers });
         var html = await res.text();
 
-        var redirectMatch = html.match(/window\.location\.href\s*=\s*'([^']+)/);
-        if (redirectMatch && redirectMatch[1]) {
-            return await extractVoeStream(redirectMatch[1], headers);
-        }
-
-        if (/An error occurred during encoding|Video not found/.test(html)) {
-            throw new Error('VOE Video not found');
-        }
-
-        var $ = cheerio.load(html);
-        var metaDesc = $('meta[name="description"]').attr('content') || '';
-        var title = metaDesc.trim().replace(/^Watch /, '').replace(/ at VOE$/, '').trim() || 'VOE Stream';
-
-        var hlsUrlMatch = html.match(/'hls'\s*:\s*'([^']+)'/) || html.match(/"hls"\s*:\s*"([^"]+)"/) || html.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/);
-        var streamUrl = hlsUrlMatch ? (hlsUrlMatch[1] || hlsUrlMatch[0]) : null;
-
-        if (!streamUrl) {
-            var scriptMatch = html.match(/sources\s*=\s*({[^}]+})/);
-            if (scriptMatch) {
-                try {
-                    var sources = JSON.parse(scriptMatch[1]);
-                    streamUrl = sources.hls || sources.file || sources.src;
-                } catch (e) {}
+        while (html.indexOf('const currentUrl') !== -1 || /window\.location\.href\s*=\s*'([^']+)'/.test(html)) {
+            var rMatch = html.match(/window\.location\.href\s*=\s*'([^']+)'/);
+            if (rMatch && rMatch[1]) {
+                webUrl = rMatch[1];
+                res = await fetch(webUrl, { headers: headers });
+                html = await res.text();
+            } else {
+                break;
             }
         }
 
-        var sizeMatch = html.matchAll(/[\d.]+ ?[GM]B/g).toArray();
-        var sizeStr = sizeMatch.length > 0 ? sizeMatch[sizeMatch.length - 1][0] : 'Server';
+        // Check for JSON script token format
+        var jsonMatch = html.match(/json">\["([^"]+)"\]<\/script>\s*<script\s*src="([^"]+)"/);
+        if (jsonMatch) {
+            var jsUrl = new URL(jsonMatch[2], webUrl).href;
+            var jsRes = await fetch(jsUrl, { headers: headers });
+            var jsHtml = await jsRes.text();
+            
+            var replMatch = jsHtml.match(/(\[(?:'\W{2}'[,\]]){1,9})/);
+            if (replMatch) {
+                var sObj = voeDecode(jsonMatch[1], replMatch[1]);
+                if (sObj) {
+                    var candidateUrl = sObj.file || sObj.source || sObj.direct_access_url;
+                    if (candidateUrl) {
+                        return {
+                            url: candidateUrl,
+                            title: sObj.title || 'VOE Stream',
+                            size: 'Server',
+                            headers: Object.assign({}, headers, { 'Referer': webUrl })
+                        };
+                    }
+                }
+            }
+        }
+
+        // Fallback helper regex parsing for hls streams
+        var hlsMatch = html.match(/hls['"]\s*:\s*['"]([^'"]+)['"]/);
+        if (hlsMatch && hlsMatch[1]) {
+            return {
+                url: hlsMatch[1],
+                title: 'VOE Stream',
+                size: 'Server',
+                headers: Object.assign({}, headers, { 'Referer': webUrl })
+            };
+        }
 
         return {
-            url: streamUrl || targetUrl.href,
-            title: title,
-            size: sizeStr,
+            url: webUrl,
+            title: 'VOE Stream',
+            size: 'Server',
             headers: headers
         };
     } catch (e) {
@@ -183,80 +230,55 @@ var DEFAULT_HEADERS = {
 
 async function getFinalRedirect(url, referer) {
     try {
-        console.log(`[S.TO] Resolving redirect: ${url}`);
         const response = await fetch(url, {
             method: 'GET',
-            headers: { ...DEFAULT_HEADERS, 'Referer': referer },
+            headers: Object.assign({}, DEFAULT_HEADERS, { 'Referer': referer }),
             redirect: 'follow'
         });
         return response.url;
     } catch (e) {
-        console.error(`[S.TO] Redirect resolution failed: ${e.message}`);
         return url;
     }
 }
 
 async function getStreams(tmdbId, type, season, episode, onResult) {
     if (type !== 'series' && type !== 'show' && type !== 'tv') {
-        console.log(`[S.TO] Skip: Provider does not support type "${type}"`);
         return [];
     }
 
     var results = [];
-    console.log(`\n--- [S.TO] Search: TMDB ${tmdbId} | S${season}E${episode} ---`);
 
     try {
         var tmdbUrl = `${TMDB_BASE_URL}/tv/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`;
-        
-        console.log(`[S.TO] Fetching External IDs: ${tmdbUrl}`);
         var idRes = await fetch(tmdbUrl);
-        
-        if (idRes.status === 404) {
-            console.error(`[S.TO] Error 404: TMDB ID ${tmdbId} not found. Ensure this is a TV Show ID, not a Movie ID.`);
-            return [];
-        }
+        if (idRes.status === 404) return [];
 
         var idData = await idRes.json();
         var imdbId = idData.imdb_id;
-
-        if (!imdbId) {
-            console.log("[S.TO] No IMDB-ID linked to this TMDB entry.");
-            return [];
-        }
-        console.log(`[S.TO] Found IMDB ID: ${imdbId}`);
+        if (!imdbId) return [];
 
         var searchUrl = `${BASE_URL}/suche?term=${imdbId}`;
-        console.log(`[S.TO] Searching S.TO: ${searchUrl}`);
         var searchRes = await fetch(searchUrl, { headers: DEFAULT_HEADERS });
         var searchHtml = await searchRes.text();
         var $search = cheerio.load(searchHtml);
 
         var relativeSeriesLink = $search('.col-6.col-md-4.col-lg-2 a.show-cover').attr('href');
-        
         if (!relativeSeriesLink) {
             if (searchHtml.includes('series-title')) {
-                console.log("[S.TO] Search redirected directly to series page.");
                 relativeSeriesLink = new URL(searchRes.url).pathname;
             } else {
-                console.warn("[S.TO] Series link not found in search results.");
                 return [];
             }
         }
 
         var targetUrl = `${BASE_URL}${relativeSeriesLink}/staffel-${season}/episode-${episode}`;
-        console.log(`[S.TO] Navigating to: ${targetUrl}`);
         var epRes = await fetch(targetUrl, { headers: DEFAULT_HEADERS });
-        
-        if (!epRes.ok) {
-            console.error(`[S.TO] Episode page returned status ${epRes.status}`);
-            return [];
-        }
+        if (!epRes.ok) return [];
 
         var epHtml = await epRes.text();
         var $ep = cheerio.load(epHtml);
 
         var linkBoxes = $ep('button.link-box[data-language-id="1"]').toArray();
-        console.log(`[S.TO] Found ${linkBoxes.length} potential German streams.`);
         
         for (var el of linkBoxes) {
             var playPath = $ep(el).attr('data-play-url');
@@ -273,7 +295,6 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
             }
 
             var langCode = mapLanguage(languageLabel, languageId);
-
             if (!playPath) continue;
 
             var redirectUrl = BASE_URL + playPath;
@@ -282,6 +303,10 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
             if (rawHosterUrl && !rawHosterUrl.includes('s.to/r/')) {
                 var finalUrl = rawHosterUrl;
                 var sizeLabel = 'Server';
+                var customHeaders = {
+                    'User-Agent': 'MediaUrl/2',
+                    'Referer': BASE_URL + '/'
+                };
 
                 var isDood = /dood|do[0-9]go|doood|dooood|ds2play|ds2video|dsvplay|d0o0d|do0od|d0000d|d000d|myvidplay|vidply|all3do|doply|vide0|vvide0|d-s|playmogo|playmogo.com/i.test(rawHosterUrl);
                 var isVoe = isVoeUrl(rawHosterUrl);
@@ -291,18 +316,20 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
                     if (doodResult) {
                         finalUrl = doodResult.url;
                         sizeLabel = doodResult.size;
+                        customHeaders = doodResult.headers;
                     }
                 } else if (isVoe) {
                     var voeResult = await extractVoeStream(rawHosterUrl, { 'Referer': targetUrl });
                     if (voeResult) {
                         finalUrl = voeResult.url;
                         sizeLabel = voeResult.size;
+                        customHeaders = voeResult.headers;
                     }
                 }
 
                 var hostDomain = sizeLabel;
                 try {
-                    if (sizeLabel === 'Server' || sizeLabel.indexOf('GB') === -1 && sizeLabel.indexOf('MB') === -1) {
+                    if (sizeLabel === 'Server' || (sizeLabel.indexOf('GB') === -1 && sizeLabel.indexOf('MB') === -1)) {
                         hostDomain = (new URL(finalUrl)).hostname.replace(/^www\./i, '');
                     }
                 } catch (e) {}
@@ -318,28 +345,19 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
                     url: finalUrl,
                     quality: 'HD',
                     size: hostDomain,
-                    headers: {
-                        'User-Agent': 'MediaUrl/2',
-                        'Referer': BASE_URL + '/'
-                    },
+                    headers: customHeaders,
                     provider: 'sto'
                 };
 
                 try {
                     if (typeof onResult === 'function') onResult(streamObj);
-                } catch (e) {
-                    console.error('[S.TO] onResult callback error:', e && e.message);
-                }
+                } catch (e) {}
 
                 results.push(streamObj);
-                console.log(`[S.TO] Added: ${hosterName} -> ${hostDomain}`);
             }
         }
-    } catch (e) {
-        console.error("[S.TO] Critical Error during execution:", e.message);
-    }
+    } catch (e) {}
 
-    console.log(`[S.TO] Finished. Total results: ${results.length}\n`);
     return results;
 }
 
