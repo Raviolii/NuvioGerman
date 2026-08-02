@@ -117,6 +117,51 @@ function isVoeUrl(urlStr) {
     }
 }
 
+function decodeBase64Utf8(value) {
+    try {
+        if (!value) return '';
+        if (typeof globalThis.atob === 'function') {
+            return globalThis.atob(value);
+        }
+        if (typeof Buffer !== 'undefined' && Buffer.from) {
+            return Buffer.from(value, 'base64').toString('utf8');
+        }
+
+        var base64 = String(value).replace(/[^A-Za-z0-9+/=]/g, '');
+        var padding = (4 - (base64.length % 4)) % 4;
+        base64 += '='.repeat(padding);
+
+        var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+        var lookup = {};
+        for (var i = 0; i < alphabet.length; i++) {
+            lookup[alphabet.charAt(i)] = i;
+        }
+
+        var bytes = [];
+        for (var i = 0; i < base64.length; i += 4) {
+            var a = lookup[base64.charAt(i)] >>> 0;
+            var b = lookup[base64.charAt(i + 1)] >>> 0;
+            var c = lookup[base64.charAt(i + 2)] >>> 0;
+            var d = lookup[base64.charAt(i + 3)] >>> 0;
+
+            bytes.push((a << 2) | (b >> 4));
+            if (base64.charAt(i + 2) !== '=') {
+                bytes.push(((b & 15) << 4) | (c >> 2));
+            }
+            if (base64.charAt(i + 3) !== '=') {
+                bytes.push(((c & 3) << 6) | d);
+            }
+        }
+
+        if (typeof TextDecoder !== 'undefined') {
+            return new TextDecoder('utf-8').decode(new Uint8Array(bytes));
+        }
+
+        return String.fromCharCode.apply(null, bytes);
+    } catch (e) {}
+    return '';
+}
+
 function voeDecode(ct, luts) {
     try {
         var lutMatches = luts.slice(2, -2).split("','");
@@ -140,14 +185,14 @@ function voeDecode(ct, luts) {
             txt = txt.replace(regex, '');
         }
 
-        var decodedB64 = Buffer.from(txt, 'base64').toString('utf8');
+        var decodedB64 = decodeBase64Utf8(txt);
         var shifted = '';
         for (var k = 0; k < decodedB64.length; k++) {
             shifted += String.fromCharCode(decodedB64.charCodeAt(k) - 3);
         }
 
         var reversedB64 = shifted.split('').reverse().join('');
-        var finalJsonStr = Buffer.from(reversedB64, 'base64').toString('utf8');
+        var finalJsonStr = decodeBase64Utf8(reversedB64);
         return JSON.parse(finalJsonStr);
     } catch (e) {
         return null;
@@ -196,6 +241,16 @@ async function extractVoeStream(urlStr, headers) {
         }
 
         // Fallback helper regex parsing for hls streams
+        var m3u8Match = html.match(/https?:\/\/[^"'\s]+\.m3u8(?:\?[^"'\s]*)?/i);
+        if (m3u8Match && m3u8Match[0]) {
+            return {
+                url: m3u8Match[0],
+                title: 'VOE Stream',
+                size: 'Server',
+                headers: Object.assign({}, headers, { 'Referer': webUrl })
+            };
+        }
+
         var hlsMatch = html.match(/hls['"]\s*:\s*['"]([^'"]+)['"]/);
         if (hlsMatch && hlsMatch[1]) {
             return {
