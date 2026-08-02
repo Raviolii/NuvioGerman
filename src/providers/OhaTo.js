@@ -512,13 +512,14 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
         var finalUrl = url.href;
         var headersObj = Object.assign({}, DEFAULT_HEADERS, { 'Referer': 'https://oha.to/' });
 
-        var displayName = (s && s.name) ? (s.name + ' (' + (langCode ? langCode.toUpperCase() : 'DE') + ')') : (meta.title || 'Oha.to');
+        var displayQuality = quality || (s && (s.tag || s.quality)) || 'HD';
+        var displayName = (s && s.name) ? (s.name + ' (' + (langCode ? langCode.toUpperCase() : 'DE') + ') - ' + displayQuality) : (meta.title || 'Oha.to');
 
         var streamObj = {
           name: displayName,
           title: displayName,
           language: langCode,
-          quality: quality || 'HD',
+          quality: displayQuality,
           url: finalUrl,
           provider: 'ohato',
           meta: meta
