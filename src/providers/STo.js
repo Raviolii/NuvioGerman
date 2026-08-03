@@ -389,6 +389,12 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
                     }
                 } catch (e) {}
 
+                // Only include playable streams (m3u8, mp4, mkv). If the resolved finalUrl is not one of these, skip it.
+                if (!/\.(m3u8|mp4|mkv)(?:\?|$)/i.test(finalUrl)) {
+                    // skip non-playable streams to avoid showing raw page URLs
+                    continue;
+                }
+
                 var displayLang = langCode ? langCode.toUpperCase() : (languageLabel || 'DE');
                 var streamObj = {
                     name: `${hosterName} (${displayLang}) - S${season}E${episode}`,

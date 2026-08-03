@@ -980,6 +980,13 @@ async function getStreams(tmdbId, type, season, episode) {
 
         await Promise.all(postPromises);
 
+        // Filter results to include playable streams (m3u8, mp4, mkv). If there is no supported URL, do not show the entry.
+        results = results.filter(function(item) {
+            if (!item || !item.url) return false;
+            var urlStr = typeof item.url === 'string' ? item.url : (item.url && item.url.href) || '';
+            return /\.(m3u8|mp4|mkv)(?:\?|$)/i.test(String(urlStr));
+        });
+
         return results;
     } catch (err) {
         return [];

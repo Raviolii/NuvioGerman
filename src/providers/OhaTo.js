@@ -870,6 +870,12 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
         var displayQuality = quality || (s && (s.tag || s.quality)) || 'HD';
         var displayName = (s && s.name) ? (s.name + ' (' + (langCode ? langCode.toUpperCase() : 'DE') + ') - ' + displayQuality) : (meta.title || 'Oha.to');
 
+        // Only expose playable streams (m3u8, mp4, mkv) to the app. If the resolved URL is not one of these, skip it.
+        if (!/\.(m3u8|mp4|mkv)(?:\?|$)/i.test(finalUrl)) {
+          // Skip non-playable streams
+          return null;
+        }
+
         var streamObj = {
           name: displayName,
           title: displayName,
