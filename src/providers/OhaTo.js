@@ -1,6 +1,6 @@
 /* istanbul ignore file */
 
-var cheerio = require('cheerio');
+var cheerio = require('cheerio-without-node-native');
 
 // TMDB API key (falls back to process.env.TMDB_API_KEY if set)
 var TMDB_API_KEY = 'b1b501578f88cfaaaf0178b3d392ccf9';
@@ -12,10 +12,191 @@ var DEFAULT_HEADERS = {
   'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
 };
 
+function randomBytesHex(length) {
+  var bytes = new Uint8Array(length);
+  if (typeof globalThis !== 'undefined' && globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function') {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (var i = 0; i < length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+
+  return Array.prototype.map.call(bytes, function (b) {
+    return (b < 16 ? '0' : '') + b.toString(16);
+  }).join('');
+}
+
+function toUint8Array(value) {
+  if (!value) return new Uint8Array(0);
+  if (value instanceof Uint8Array) return value;
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) return new Uint8Array(value);
+  if (typeof value === 'string') {
+    var encoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
+    return encoder ? encoder.encode(value) : new Uint8Array(Array.from(value).map(function (c) { return c.charCodeAt(0); }));
+  }
+  return new Uint8Array(value);
+}
+
+function concatUint8Arrays(arrays) {
+  var length = arrays.reduce(function (sum, item) { return sum + item.length; }, 0);
+  var result = new Uint8Array(length);
+  var offset = 0;
+  arrays.forEach(function (item) {
+    result.set(item, offset);
+    offset += item.length;
+  });
+  return result;
+}
+
+function base64Encode(bytes) {
+  if (typeof Buffer !== 'undefined' && Buffer.from) {
+    return Buffer.from(bytes).toString('base64');
+  }
+
+  var binary = '';
+  for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  if (typeof globalThis !== 'undefined' && typeof globalThis.btoa === 'function') {
+    return globalThis.btoa(binary);
+  }
+
+  var base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  var output = '';
+  for (var i = 0; i < bytes.length; i += 3) {
+    var chunk = (bytes[i] << 16) + ((bytes[i + 1] || 0) << 8) + (bytes[i + 2] || 0);
+    output += base64Chars[(chunk >> 18) & 63];
+    output += base64Chars[(chunk >> 12) & 63];
+    output += typeof bytes[i + 1] !== 'undefined' ? base64Chars[(chunk >> 6) & 63] : '=';
+    output += typeof bytes[i + 2] !== 'undefined' ? base64Chars[chunk & 63] : '=';
+  }
+  return output;
+}
+
+function base64UrlEncode(value) {
+  var bytes = toUint8Array(value);
+  var base64 = base64Encode(bytes);
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlDecodeToBytes(value) {
+  if (!value) return new Uint8Array(0);
+  var normalized = String(value).replace(/-/g, '+').replace(/_/g, '/');
+  var padding = normalized.length % 4;
+  if (padding === 2) normalized += '==';
+  else if (padding === 3) normalized += '=';
+  else if (padding === 1) normalized += '===';
+
+  if (typeof Buffer !== 'undefined' && Buffer.from) {
+    return new Uint8Array(Buffer.from(normalized, 'base64'));
+  }
+  if (typeof globalThis !== 'undefined' && typeof globalThis.atob === 'function') {
+    var binary = globalThis.atob(normalized);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  var lookup = {};
+  for (var i = 0; i < alphabet.length; i++) lookup[alphabet.charAt(i)] = i;
+  var bytes = [];
+  for (var j = 0; j < normalized.length; j += 4) {
+    var a = lookup[normalized.charAt(j)] || 0;
+    var b = lookup[normalized.charAt(j + 1)] || 0;
+    var c = lookup[normalized.charAt(j + 2)] || 0;
+    var d = lookup[normalized.charAt(j + 3)] || 0;
+    var n = (a << 18) | (b << 12) | (c << 6) | d;
+    bytes.push((n >> 16) & 255);
+    if (normalized.charAt(j + 2) !== '=') bytes.push((n >> 8) & 255);
+    if (normalized.charAt(j + 3) !== '=') bytes.push(n & 255);
+  }
+  return new Uint8Array(bytes);
+}
+
+function decodeUtf8(bytes) {
+  if (!bytes) return '';
+  if (typeof TextDecoder !== 'undefined') {
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+  var result = '';
+  for (var i = 0; i < bytes.length; i++) result += String.fromCharCode(bytes[i]);
+  return result;
+}
+
+function base64UrlDecode(value) {
+  if (!value) return '';
+  var normalized = String(value).replace(/-/g, '+').replace(/_/g, '/');
+  var padding = normalized.length % 4;
+  if (padding === 2) normalized += '==';
+  else if (padding === 3) normalized += '=';
+  else if (padding === 1) normalized += '===';
+
+  if (typeof Buffer !== 'undefined' && Buffer.from) {
+    return Buffer.from(normalized, 'base64').toString('utf8');
+  }
+  if (typeof globalThis !== 'undefined' && typeof globalThis.atob === 'function') {
+    return globalThis.atob(normalized);
+  }
+  return decodeUtf8(base64UrlDecodeToBytes(value));
+}
+
+async function sha256Digest(message) {
+  var data = toUint8Array(String(message));
+  if (typeof globalThis !== 'undefined' && globalThis.crypto && globalThis.crypto.subtle && typeof globalThis.crypto.subtle.digest === 'function') {
+    var hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', data);
+    return new Uint8Array(hashBuffer);
+  }
+  return new Uint8Array(0);
+}
+
+async function makeByseFingerprint() {
+  var viewerId = randomBytesHex(16);
+  var deviceId = randomBytesHex(16);
+  var ctime = Math.floor(Date.now() / 1000);
+  var tData = {
+    viewer_id: viewerId,
+    device_id: deviceId,
+    confidence: Number((Math.random() * 0.11 + 0.83).toFixed(2)),
+    iat: ctime,
+    exp: ctime + 600
+  };
+  var b64Data = base64UrlEncode(JSON.stringify(tData));
+  var sigBytes = await sha256Digest(b64Data);
+  var sig = base64UrlEncode(sigBytes);
+  var token = b64Data + '.' + sig;
+  tData.token = token;
+  delete tData.iat;
+  delete tData.exp;
+  return { fingerprint: tData };
+}
+
+async function aesGcmDecrypt(keyBytes, ivBytes, ciphertextBytes, tagBytes) {
+  if (!keyBytes || !ivBytes || !ciphertextBytes || !tagBytes) return null;
+
+  if (typeof globalThis !== 'undefined' && globalThis.crypto && globalThis.crypto.subtle && typeof globalThis.crypto.subtle.decrypt === 'function') {
+    try {
+      var algo = { name: 'AES-GCM', iv: ivBytes, tagLength: 128 };
+      var key = await globalThis.crypto.subtle.importKey('raw', keyBytes, algo, false, ['decrypt']);
+      var combined = new Uint8Array(ciphertextBytes.length + tagBytes.length);
+      combined.set(ciphertextBytes, 0);
+      combined.set(tagBytes, ciphertextBytes.length);
+      var plaintextBuffer = await globalThis.crypto.subtle.decrypt(algo, key, combined.buffer);
+      return new Uint8Array(plaintextBuffer);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 var STREAMING_HOSTS = [
   'voe', 'dood', 'streamtape', 'veev', 'vidhide', 'dhtpre',
   'mixdrop', 'supervideo', 'uqload', 'filelion', 'lulustream', 'fastream',
-  'dropload', 'savefiles', 'streamembed', 'vidara', 'vidsonic', 'firestream', 'vidmatrixa'
+  'dropload', 'savefiles', 'streamembed', 'vidara', 'vidsonic', 'firestream', 'vidmatrixa',
+  'filemoon', 'cinegrab', 'moonmov', 'kerapoxy', 'furher', '1azayf9w', '81u6xl9d', 'f16px',
+  'smdfs40r', 'bf0skv', 'z1ekv717', 'l1afav', '222i8x', '8mhlloqo', '96ar', 'xcoic', 'f51rm',
+  'c1z39', 'boosteradx', 'streamlyplayer', 'moflix-stream', 'byse', 'bysetayico', 'bysevepoin',
+  'bysezejataos', 'bysekoze', 'bysesukior', 'bysejikuar', 'bysefujedu', 'bysedikamoum', 'bysebuho',
+  'bysewihe', 'byselapuix', 'embedplaybyse', 'sb1254w9megshle'
 ];
 
 function isStreamingHost(hostname) {
@@ -135,6 +316,159 @@ async function resolveFireStreamPageToStream(pageUrl) {
   return null;
 }
 
+async function getByseCaptchaToken(captchaUrl, headers) {
+  try {
+    var fingerprint = await makeByseFingerprint();
+    var res = await fetch(captchaUrl, {
+      method: 'POST',
+      headers: Object.assign({}, headers, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(fingerprint)
+    });
+    if (!res || !res.ok) return null;
+    var data = await res.json();
+    return data && data.pow_token ? data.pow_token : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function resolveBysePageToStream(pageUrl) {
+  try {
+    var parsed = new URL(pageUrl);
+    var mediaId = parsed.pathname.split('/').filter(Boolean).pop();
+    if (!mediaId) return null;
+
+    var ref = parsed.origin + '/';
+    var headers = Object.assign({}, DEFAULT_HEADERS, {
+      'Referer': ref,
+      'Origin': ref.replace(/\/$/, ''),
+      'X-Embed-Parent': ref
+    });
+
+    var detailsUrl = ref + 'api/videos/' + mediaId + '/details';
+    var detailsRes = await fetch(detailsUrl, { headers: headers });
+    var details = null;
+    if (detailsRes && detailsRes.ok) {
+      details = await detailsRes.json();
+    } else if (detailsRes && detailsRes.status === 404) {
+      detailsUrl = ref + 'api/videos/' + mediaId + '/embed/details';
+      detailsRes = await fetch(detailsUrl, { headers: headers });
+      if (detailsRes && detailsRes.ok) details = await detailsRes.json();
+    }
+    if (!details) return null;
+
+    var embedPath = '';
+    var embedUrl = details.embed_frame_url;
+    var targetConfigs = [
+      { ref: ref, headers: headers, embedPath: '' }
+    ];
+
+    if (embedUrl) {
+      var embedRef = new URL(embedUrl, ref).origin + '/';
+      var embedHeaders = Object.assign({}, headers, {
+        'Referer': embedRef,
+        'Origin': embedRef.replace(/\/$/, ''),
+        'X-Embed-Parent': parsed.origin + '/'
+      });
+      targetConfigs.push({ ref: embedRef, headers: embedHeaders, embedPath: 'embed/' });
+    }
+
+    var data = null;
+    for (var i = 0; i < targetConfigs.length; i++) {
+      var target = targetConfigs[i];
+      var settingsUrl = target.ref + 'api/videos/' + mediaId + '/' + target.embedPath + 'settings';
+      var settingsRes = await fetch(settingsUrl, { headers: target.headers });
+      if (!settingsRes || !settingsRes.ok) continue;
+      var settings = await settingsRes.json();
+
+      var captchaToken = null;
+      if (settings && settings.captcha_required) {
+        var captchaUrl = target.ref + 'api/videos/' + mediaId + '/' + target.embedPath + 'captcha';
+        captchaToken = await getByseCaptchaToken(captchaUrl, target.headers);
+      }
+
+      var playbackUrl = target.ref + 'api/videos/' + mediaId + '/' + target.embedPath + 'playback';
+      var playbackHeaders = Object.assign({}, target.headers, { 'Content-Type': 'application/json' });
+      if (captchaToken) playbackHeaders['X-Captcha-Token'] = captchaToken;
+
+      var playbackRes = await fetch(playbackUrl, {
+        method: 'POST',
+        headers: playbackHeaders,
+        body: JSON.stringify(await makeByseFingerprint())
+      });
+
+      if ((!playbackRes || !playbackRes.ok) && playbackRes && playbackRes.status === 428) {
+        var fallbackCaptchaUrl = target.ref + 'api/videos/' + mediaId + '/' + target.embedPath + 'captcha';
+        captchaToken = await getByseCaptchaToken(fallbackCaptchaUrl, target.headers);
+        if (captchaToken) {
+          playbackHeaders['X-Captcha-Token'] = captchaToken;
+          playbackRes = await fetch(playbackUrl, {
+            method: 'POST',
+            headers: playbackHeaders,
+            body: JSON.stringify(await makeByseFingerprint())
+          });
+        }
+      }
+
+      if (!playbackRes || !playbackRes.ok) continue;
+      data = await playbackRes.json();
+      break;
+    }
+
+    if (!data) return null;
+
+    var sources = Array.isArray(data && data.sources) ? data.sources : [];
+    if (sources.length) {
+      var selected = sources.find(function(item) { return item && item.url; }) || sources[0];
+      if (selected && selected.url) {
+        return {
+          streaming_url: selected.url,
+          title: details.title || 'Byse Stream',
+          headers: Object.assign({}, headers, { 'Referer': pageUrl })
+        };
+      }
+    }
+
+    var playback = data && data.playback;
+    if (playback && playback.key_parts && playback.payload && playback.iv) {
+      var keyParts = Array.isArray(playback.key_parts) ? playback.key_parts : [];
+      if (playback.version) {
+        var v = parseInt(playback.version, 10) || 1;
+        if (keyParts.length >= 2) {
+          var partA = keyParts[v - 1] || keyParts[0];
+          var partB = keyParts[keyParts.length - v] || keyParts[keyParts.length - 1];
+          keyParts = [partA, partB];
+        }
+      }
+      var key = concatUint8Arrays(keyParts.map(base64UrlDecodeToBytes));
+      var iv = base64UrlDecodeToBytes(playback.iv);
+      var payloadBytes = base64UrlDecodeToBytes(playback.payload);
+      if (payloadBytes.length > 16) {
+        var tag = payloadBytes.slice(payloadBytes.length - 16);
+        var ciphertext = payloadBytes.slice(0, payloadBytes.length - 16);
+        var decryptedBytes = await aesGcmDecrypt(key, iv, ciphertext, tag);
+        if (decryptedBytes && decryptedBytes.length) {
+          var decoded = JSON.parse(decodeUtf8(decryptedBytes));
+          if (decoded && decoded.sources) {
+            var decodedSources = Array.isArray(decoded.sources) ? decoded.sources : [];
+            var selectedDecoded = decodedSources.find(function(item) { return item && item.url; }) || decodedSources[0];
+            if (selectedDecoded && selectedDecoded.url) {
+              return {
+                streaming_url: selectedDecoded.url,
+                title: details.title || 'Byse Stream',
+                headers: Object.assign({}, headers, { 'Referer': pageUrl })
+              };
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    return null;
+  }
+  return null;
+}
+
 async function resolveHostPageToDirectStream(pageUrl, referer) {
   if (!pageUrl) return null;
 
@@ -176,6 +510,17 @@ async function resolveHostPageToDirectStream(pageUrl, referer) {
         title: voe.title || 'VOE Stream',
         size: voe.size || 'Server',
         headers: voe.headers || Object.assign({}, baseHeaders, { 'Referer': pageUrl })
+      };
+    }
+  }
+
+  if (/(filemoon|cinegrab|moonmov|kerapoxy|furher|1azayf9w|81u6xl9d|f16px|smdfs40r|bf0skv|z1ekv717|l1afav|222i8x|8mhlloqo|96ar|xcoic|f51rm|c1z39|boosteradx|streamlyplayer|moflix-stream|byse|embedplaybyse)/i.test(hostname)) {
+    var byse = await resolveBysePageToStream(pageUrl);
+    if (byse && byse.streaming_url) {
+      return {
+        streaming_url: byse.streaming_url,
+        title: byse.title || 'Byse Stream',
+        headers: byse.headers || Object.assign({}, baseHeaders, { 'Referer': pageUrl })
       };
     }
   }
@@ -511,6 +856,16 @@ async function getStreams(tmdbId, type, season, episode, onResult) {
 
         var finalUrl = url.href;
         var headersObj = Object.assign({}, DEFAULT_HEADERS, { 'Referer': 'https://oha.to/' });
+
+        var directStream = await resolveHostPageToDirectStream(finalUrl, 'https://oha.to/');
+        if (directStream && directStream.streaming_url) {
+          finalUrl = directStream.streaming_url;
+          headersObj = Object.assign({}, headersObj, directStream.headers || {}, { 'Referer': 'https://oha.to/' });
+          meta.directStreamUrl = finalUrl;
+          meta.directStreamSource = 'resolver';
+          meta.hostPage = url.href;
+          meta.originalUrl = url.href;
+        }
 
         var displayQuality = quality || (s && (s.tag || s.quality)) || 'HD';
         var displayName = (s && s.name) ? (s.name + ' (' + (langCode ? langCode.toUpperCase() : 'DE') + ') - ' + displayQuality) : (meta.title || 'Oha.to');
